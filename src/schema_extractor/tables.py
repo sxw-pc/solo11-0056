@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 
 from .config import TableSelector
 from .dom import Node
+from .trace import HeaderSignal, HeaderTrace, not_evaluated_header_trace
 
 _WHITESPACE = re.compile(r"\s+")
 _SECTION_TAGS = frozenset({"thead", "tbody", "tfoot"})
@@ -24,6 +25,7 @@ class TableCandidate:
     column_count: int = 0
     filtered_reason: str | None = None
     notes: list[str] = field(default_factory=list)
+    header_trace: HeaderTrace | None = None
 
     @property
     def accepted(self) -> bool:
@@ -118,20 +120,76 @@ def _rows_text(row: Node) -> str:
 
 def _split_header_rows(
     table: Node, selector: TableSelector
-) -> tuple[list[Node], list[Node], bool]:
+) -> tuple[list[Node], list[Node], bool, HeaderTrace]:
     rows_with_section = _row_nodes(table)
     thead_rows = [row for row, in_thead in rows_with_section if in_thead]
     other_rows = [row for row, in_thead in rows_with_section if not in_thead]
     if thead_rows:
-        return thead_rows, other_rows, True
+        return (
+            thead_rows,
+            other_rows,
+            True,
+            HeaderTrace(
+                "thead",
+                len(thead_rows),
+                [
+                    HeaderSignal("thead", True, True, len(thead_rows)),
+                    HeaderSignal("th", False, None, None),
+                    HeaderSignal("hint_regex", False, None, None),
+                ],
+                [],
+            ),
+        )
     if not other_rows:
-        return [], [], False
+        return (
+            [],
+            [],
+            False,
+            HeaderTrace(
+                "none",
+                0,
+                [
+                    HeaderSignal("thead", True, False, 0),
+                    HeaderSignal("th", False, None, None),
+                    HeaderSignal("hint_regex", False, None, None),
+                ],
+                [],
+            ),
+        )
     first = other_rows[0]
     has_th = any(cell.tag == "th" for cell in first.children)
     hint_match = bool(selector.hint_pattern.search(_rows_text(first)))
+    co_matched = []
+    if has_th:
+        co_matched.append("th")
+    if hint_match:
+        co_matched.append("hint_regex")
+    if has_th:
+        strategy = "first_row_th"
+        signals = [
+            HeaderSignal("thead", True, False, 0),
+            HeaderSignal("th", True, True, 1),
+            HeaderSignal("hint_regex", True, hint_match, 1 if hint_match else 0),
+        ]
+    elif hint_match:
+        strategy = "first_row_hint"
+        signals = [
+            HeaderSignal("thead", True, False, 0),
+            HeaderSignal("th", True, False, 1),
+            HeaderSignal("hint_regex", True, True, 1),
+        ]
+    else:
+        strategy = "none"
+        signals = [
+            HeaderSignal("thead", True, False, 0),
+            HeaderSignal("th", True, False, 1),
+            HeaderSignal("hint_regex", True, False, 1),
+        ]
     if has_th or hint_match:
-        return [first], other_rows[1:], True
-    return [], other_rows, False
+        return [first], other_rows[1:], True, HeaderTrace(
+            strategy, 1, signals, co_matched
+        )
+    return [], other_rows, False, HeaderTrace(strategy, 0, signals, co_matched)
 
 
 def _caption(table: Node) -> str:
@@ -184,7 +242,9 @@ def _parse_candidate(
     selector: TableSelector,
     notes: list[str],
 ) -> TableCandidate:
-    header_rows, data_row_nodes, has_header = _split_header_rows(node, selector)
+    header_rows, data_row_nodes, has_header, header_trace = _split_header_rows(
+        node, selector
+    )
     header_grid = _build_grid(header_rows)
     data_grid = _build_grid(data_row_nodes)
     width = max(
@@ -207,6 +267,7 @@ def _parse_candidate(
         data_rows=data_rows,
         column_count=width,
         notes=list(notes),
+        header_trace=header_trace,
     )
     if width < selector.min_cols:
         candidate.filtered_reason = "below_min_columns"

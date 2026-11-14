@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .header_infer import TYPE_ORDER, ColumnProfile
+from .trace import TableTrace
 
 
 @dataclass
@@ -36,6 +37,7 @@ class RunResult:
     issues: list[dict[str, Any]] = field(default_factory=list)
     file_summaries: list[dict[str, Any]] = field(default_factory=list)
     evidence_index: dict[str, dict[str, Any]] = field(default_factory=dict)
+    table_traces: list[TableTrace] = field(default_factory=list)
     report: dict[str, Any] | None = None
 
     @property

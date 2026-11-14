@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from .storage import Store
+from .trace import build_trace_payload
 
 TOP_ISSUES = 10
 
@@ -117,6 +118,7 @@ def build_report(
             "tables_filtered_count": len(result.filtered_tables),
             "issues_top": _issue_rollup(result.issues),
             "diff": build_diff(result, store, baseline_run_id),
+            "trace": build_trace_payload(result),
         }
     )
     return payload

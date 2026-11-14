@@ -25,6 +25,7 @@ def _print_run_summary(result, config: AppConfig) -> None:
     print(f"database: {config.database}")
     print(f"evidence_dir: {config.evidence_dir}")
     print(f"report: {config.report_md}")
+    print(f"trace: {config.trace_json}")
     diff = (result.report or {}).get("diff", {})
     if diff.get("status") == "compared":
         print(

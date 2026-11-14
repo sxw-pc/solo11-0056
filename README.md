@@ -63,7 +63,7 @@ python -m schema_extractor.cli run --config configs/default.yaml \
 | `evidence_dir` | `build/default/evidence` | 原始表格 HTML 片段目录，文件按 SHA-256 命名。 |
 | `evidence_index` | `build/default/evidence.json` | `hash → {source_file,start,end}` 证据索引。 |
 | `report_md` | `build/default/report.md` | Markdown 质量报告路径。 |
-| `report_json` | `build/default/report.json` | JSON 质量报告路径。 |
+| `report_json` | `build/default/report.json` | JSON 质量报告路径。独立追踪文件与它同目录，固定为 `trace.json`。 |
 | `table_selector.min_rows` | `1` | 最少数据行数（不含表头）。 |
 | `table_selector.min_cols` | `2` | 最少列数。 |
 | `table_selector.require_header` | `true` | 是否丢弃无法判定表头的表格。 |
@@ -104,11 +104,12 @@ python -m schema_extractor.cli run --config configs/default.yaml \
 │   ├── storage.py              # SQLite schema、UPSERT、查询
 │   ├── evidence.py             # 证据切片、hash、复现校验
 │   ├── report.py               # 质量报告与 diff
+│   ├── trace.py                # 逐表/逐列决策追踪
 │   └── server.py               # Flask 只读本地服务
 └── tests/                      # pytest，全部离线
 ```
 
-生成物 `runs.sqlite3`、`evidence/`、`report.md`、`report.json`、`build/` 均写入 `.gitignore`，不进入交付。
+生成物 `runs.sqlite3`、`evidence/`、`report.md`、`report.json`、`trace.json`、`build/` 均写入 `.gitignore`，不进入交付。
 
 ## 数据模型
 
@@ -147,6 +148,24 @@ SQLite 使用 5 张表，schema 内联在 `storage.py` 的 `SCHEMA` 常量中：
 - `evidence/{hash}.html` 保存原始表格片段；`evidence.json` 提供 hash 到文件与行号的映射。
 - 相同输入文件 + 相同配置 + 相同 `--now` ⇒ 相同 `run_id`、记录、报告字节。`run_id` 由时间、配置哈希和文件哈希共同确定。
 - `report.json` 生成时使用注入的 `--now` 作为 `generated_at`；`test_cli` / `test_golden` 固定时间进行断言。
+
+## 决策追踪
+
+每次 run 除了既有的 `records` 与报告字段外，还写入逐表、逐列的决策追踪：
+
+- `report.json` 新增 `trace` 字段（原有字段保持不动）。
+- 同时落一份独立文件 `trace.json`（与 `report_json` 同目录），内容与 `report.json` 里的 `trace` 完全一致。
+- 追踪不参与任何业务计算，也不改变异常语义：规范化失败仍以 `issues` 为准，追踪里的失败步骤只是额外记录，不计入 `issues_count`。
+
+单张表追踪的要点：
+
+- `decision` / `filter_reason`：最终采信（`accepted`）还是过滤，以及过滤原因。
+- `notes`：嵌套策略等带来的说明（例如 `nested_table_skipped`、`nested_table_flattened`）。
+- `header_detection`：表头判定命中的分支与顺序。`thead` → 首行 `th` → `hint_regex`；当 `th` 与 hint 同时命中时按 `th` 分支优先返回，hint 仍记录在 `co_matched`。
+- `columns[].inference`：类型推断命中的优先级分支、命中比例（`match_ratio` 与 `matched`/`compared`）、`ratio_scope`、样本摘要，以及被评估过的各分支 `checks`。
+- `normalization.steps`：规范化失败的单元格（行、列、原因、原文），只进入追踪。
+
+追踪顺序完全由文件顺序、文档顺序、列顺序与行顺序决定，不依赖集合遍历或时间戳，因此同一输入 + 同一 `--now` 产生完全相同的追踪字节。
 
 ## 测试
 

@@ -16,6 +16,7 @@ from .processing import process_table, snapshot_rows
 from .report import build_report, write_reports
 from .storage import Store
 from .tables import extract_tables
+from .trace import build_table_trace, build_trace_payload, write_trace
 
 __all__ = [
     "PipelineError",
@@ -118,13 +119,21 @@ def build_run(config: AppConfig, now: str | None = None) -> RunResult:
                         "notes": list(candidate.notes),
                     }
                 )
+                result.table_traces.append(
+                    build_table_trace(source_file, candidate)
+                )
                 continue
-            table_result, evidence = process_table(
+            table_result, evidence, processing = process_table(
                 config, source_file, source, candidate
             )
             raw_table = candidate.node.source_slice(source)
             result.accepted_tables.append(table_result)
             result.issues.extend(table_result.issues)
+            result.table_traces.append(
+                build_table_trace(
+                    source_file, candidate, table_result, processing
+                )
+            )
             evidence_records.append(evidence)
             fragments[evidence.table_html_sha256] = raw_table
             accepted_here += 1
@@ -170,6 +179,7 @@ def execute_run(
     payload = build_report(result, store, diff_with)
     result.report = payload
     write_reports(payload, config.report_md, config.report_json)
+    write_trace(build_trace_payload(result), config.trace_json)
     return result
 
 

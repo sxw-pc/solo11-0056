@@ -44,6 +44,7 @@ def test_execute_run_writes_all_outputs(default_config):
     assert default_config.database.is_file()
     assert default_config.report_md.is_file()
     assert default_config.report_json.is_file()
+    assert default_config.trace_json.is_file()
     assert default_config.evidence_index.is_file()
     evidence_files = list(default_config.evidence_dir.glob("*.html"))
     assert len(evidence_files) == 5
@@ -60,6 +61,20 @@ def test_same_now_produces_identical_report_bytes(default_config):
     execute_run(default_config, now=FIXED_NOW)
     second = default_config.report_json.read_bytes()
     assert first == second
+
+
+def test_same_now_produces_identical_trace_bytes(default_config):
+    execute_run(default_config, now=FIXED_NOW)
+    first = default_config.trace_json.read_bytes()
+    execute_run(default_config, now=FIXED_NOW)
+    second = default_config.trace_json.read_bytes()
+    assert first == second
+    assert first.endswith(b"\n")
+    # 追踪同时写入 report.json，且与独立文件一致。
+    embedded = json.loads(
+        default_config.report_json.read_text(encoding="utf-8")
+    )["trace"]
+    assert embedded == json.loads(first)
 
 
 def test_different_now_changes_run_id_but_not_records(default_config):

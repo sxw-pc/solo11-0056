@@ -105,6 +105,12 @@ class AppConfig:
     source_path: Path
     raw: dict[str, Any] = field(default_factory=dict)
 
+    @property
+    def trace_json(self) -> Path:
+        """独立追踪文件与 report.json 同目录，不参与配置哈希。"""
+
+        return self.report_json.with_name("trace.json")
+
 
 def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
     merged = copy.deepcopy(base)

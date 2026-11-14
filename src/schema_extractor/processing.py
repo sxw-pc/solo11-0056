@@ -6,10 +6,11 @@ from typing import Any
 
 from .config import AppConfig
 from .evidence import EvidenceRecord, build_evidence
-from .header_infer import ColumnProfile, infer_columns
+from .header_infer import ColumnProfile, infer_columns_with_trace
 from .models import RunResult, TableResult
-from .normalize import normalize_cell
+from .normalize import clean_text, normalize_cell
 from .tables import TableCandidate
+from .trace import FailureStep, TableProcessingTrace
 
 
 def table_issue(
@@ -31,6 +32,7 @@ def build_record(
     row: list[str | None],
     columns: list[ColumnProfile],
     date_formats: tuple[str, ...],
+    failure_steps: list[FailureStep] | None = None,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     values: dict[str, str] = {}
     units: dict[str, str] = {}
@@ -45,6 +47,17 @@ def build_record(
             issues.append(
                 table_issue(table_index, source_file, row_index, column.name, reason)
             )
+            if failure_steps is not None:
+                failure_steps.append(
+                    FailureStep(
+                        row_index=row_index,
+                        column_index=index,
+                        col_name=column.name,
+                        column_type=column.type,
+                        reason=reason,
+                        value=clean_text(raw),
+                    )
+                )
     record = {
         "source_file": source_file,
         "table_index": table_index,
@@ -60,8 +73,8 @@ def process_table(
     source_file: str,
     source: str,
     candidate: TableCandidate,
-) -> tuple[TableResult, EvidenceRecord]:
-    columns = infer_columns(
+) -> tuple[TableResult, EvidenceRecord, TableProcessingTrace]:
+    columns, column_traces = infer_columns_with_trace(
         candidate.header_names,
         candidate.unnamed_headers,
         candidate.data_rows,
@@ -70,6 +83,8 @@ def process_table(
     )
     records: list[dict[str, Any]] = []
     issues: list[dict[str, Any]] = []
+    failure_steps: list[FailureStep] = []
+    cells = 0
     for row_index, row in enumerate(candidate.data_rows):
         record, row_issues = build_record(
             source_file,
@@ -78,9 +93,11 @@ def process_table(
             row,
             columns,
             config.normalization.date_formats,
+            failure_steps,
         )
         records.append(record)
         issues.extend(row_issues)
+        cells += len(columns)
     raw_table = candidate.node.source_slice(source)
     evidence = build_evidence(
         source_file,
@@ -101,7 +118,12 @@ def process_table(
         source_line_end=evidence.source_line_end,
         nested=candidate.nested,
     )
-    return result, evidence
+    trace = TableProcessingTrace(
+        columns=column_traces,
+        cells=cells,
+        failure_steps=failure_steps,
+    )
+    return result, evidence, trace
 
 
 def snapshot_rows(
