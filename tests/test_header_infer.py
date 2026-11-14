@@ -1,3 +1,4 @@
+from schema_extractor.config import NormalizationOptions
 from schema_extractor.header_infer import (
     ColumnProfile,
     infer_column,
@@ -39,6 +40,31 @@ def test_date_type(default_config):
         "日期", ["2026-01-01", "2026/01/02", "2026年1月3日"], default_config
     )
     assert profile.type == "date"
+    assert profile.date_precisions == ()
+    assert "date_precisions" not in profile.to_dict()
+
+
+def test_date_column_with_partial_precision_and_time(default_config):
+    profile = _infer(
+        "日期",
+        ["2026-01", "2026-01-02", "2026/01/03 08:00"],
+        default_config,
+    )
+    assert profile.type == "date"
+    assert profile.match_ratio == 1.0
+    assert profile.date_precisions == ("month", "minute")
+    assert profile.to_dict()["date_precisions"] == ["month", "minute"]
+
+
+def test_year_only_column_infers_date(default_config):
+    profile = _infer("年份", ["2024", "2025", "2026"], default_config)
+    assert profile.type == "date"
+    assert profile.date_precisions == ("year",)
+
+
+def test_three_digit_numbers_stay_integer(default_config):
+    profile = _infer("数量", ["800", "900", "950"], default_config)
+    assert profile.type == "integer"
 
 
 def test_integer_type(default_config):
@@ -114,3 +140,28 @@ def test_column_profile_to_dict_is_stable():
         "sample_values": ["值"],
         "unnamed": False,
     }
+
+
+def test_column_profile_to_dict_includes_date_precisions_when_present():
+    profile = ColumnProfile("日期", "date", 1.0, ["2026-01"], False, ("month",))
+    assert profile.to_dict() == {
+        "name": "日期",
+        "type": "date",
+        "match_ratio": 1.0,
+        "sample_values": ["2026-01"],
+        "unnamed": False,
+        "date_precisions": ["month"],
+    }
+
+
+def test_partial_date_forms_can_be_disabled(default_config):
+    normalization = NormalizationOptions(partial_date_formats=(), time_formats=())
+    profile = infer_column(
+        "日期",
+        ["2026-01", "2026-01-02", "2026/01/03 08:00"],
+        False,
+        default_config.inference,
+        normalization,
+    )
+    # 只剩整日格式可命中（1/3 < min_match_ratio），整列回退 text
+    assert profile.type == "text"

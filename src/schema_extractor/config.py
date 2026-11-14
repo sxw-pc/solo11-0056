@@ -14,6 +14,13 @@ from typing import Any
 
 import yaml
 
+from .normalize import (
+    DEFAULT_DATE_FORMATS,
+    DEFAULT_PARTIAL_DATE_FORMATS,
+    DEFAULT_TIME_FORMATS,
+    date_format_precision,
+)
+
 
 class ConfigError(ValueError):
     """配置缺失、类型错误或取值非法。"""
@@ -47,6 +54,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
     },
     "normalization": {
         "date_formats": ["%Y-%m-%d", "%Y/%m/%d", "%Y年%m月%d日"],
+        "partial_date_formats": ["%Y-%m", "%Y/%m", "%Y年%m月", "%Y", "%Y年"],
+        "time_formats": ["%H:%M:%S", "%H:%M"],
     },
 }
 
@@ -84,7 +93,9 @@ class InferenceOptions:
 
 @dataclass(frozen=True)
 class NormalizationOptions:
-    date_formats: tuple[str, ...]
+    date_formats: tuple[str, ...] = DEFAULT_DATE_FORMATS
+    partial_date_formats: tuple[str, ...] = DEFAULT_PARTIAL_DATE_FORMATS
+    time_formats: tuple[str, ...] = DEFAULT_TIME_FORMATS
 
 
 @dataclass(frozen=True)
@@ -194,11 +205,29 @@ def validate_config(raw: dict[str, Any]) -> None:
     except re.error as exc:
         raise ConfigError(f"identifier_pattern 非法: {exc}") from exc
 
-    formats = raw["normalization"]["date_formats"]
+    normalization = raw["normalization"]
+    formats = normalization["date_formats"]
     if not isinstance(formats, list) or not formats:
         raise ConfigError("normalization.date_formats 必须是非空列表")
     if any(not isinstance(item, str) or not item for item in formats):
         raise ConfigError("normalization.date_formats 中的每一项都必须是非空字符串")
+
+    for key in ("partial_date_formats", "time_formats"):
+        items = normalization[key]
+        if not isinstance(items, list):
+            raise ConfigError(f"normalization.{key} 必须是列表（可为空列表以停用）")
+        if any(not isinstance(item, str) or not item for item in items):
+            raise ConfigError(f"normalization.{key} 中的每一项都必须是非空字符串")
+    for item in normalization["partial_date_formats"]:
+        if date_format_precision(item) in {"minute", "second"}:
+            raise ConfigError(
+                f"normalization.partial_date_formats 不能包含时间指令: {item}"
+            )
+    for item in normalization["time_formats"]:
+        if date_format_precision(item) not in {"minute", "second"}:
+            raise ConfigError(
+                f"normalization.time_formats 中的每一项都必须包含时间指令: {item}"
+            )
 
 
 def _canonical_sha256(raw: dict[str, Any]) -> str:
@@ -243,7 +272,9 @@ def load_config(path: str | Path) -> AppConfig:
         identifier_pattern=inference_raw["identifier_pattern"],
     )
     normalization = NormalizationOptions(
-        date_formats=tuple(normalization_raw["date_formats"])
+        date_formats=tuple(normalization_raw["date_formats"]),
+        partial_date_formats=tuple(normalization_raw["partial_date_formats"]),
+        time_formats=tuple(normalization_raw["time_formats"]),
     )
     return AppConfig(
         project_name=raw["project_name"],

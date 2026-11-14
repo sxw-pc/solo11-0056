@@ -9,6 +9,7 @@ from schema_extractor.pipeline import (
     execute_run,
     records_jsonl,
 )
+from schema_extractor.report import summary_for_golden
 from schema_extractor.storage import Store
 
 FIXED_NOW = "2026-01-01T00:00:00Z"
@@ -161,3 +162,109 @@ def test_file_glob_limits_the_input_set(config_factory):
     assert result.tables_detected == 1
     assert result.records_written == 4
     assert result.records_for("page_01.html")
+
+
+def _write_page(tmp_path, html: str) -> str:
+    (tmp_path / "page.html").write_text(html, encoding="utf-8")
+    return str(tmp_path)
+
+
+def test_partial_precision_dates_flow_through_pipeline(config_factory, tmp_path):
+    html = """<html><body>
+<table>
+  <thead><tr><th>名称</th><th>日期</th></tr></thead>
+  <tbody>
+    <tr><td>甲</td><td>2026</td></tr>
+    <tr><td>乙</td><td>2026-01</td></tr>
+    <tr><td>丙</td><td>2026-01-02</td></tr>
+    <tr><td>丁</td><td>2026/01/03 08:00</td></tr>
+  </tbody>
+</table>
+</body></html>"""
+    config = config_factory(input_dir=_write_page(tmp_path, html))
+    result = build_run(config, FIXED_NOW)
+    assert len(result.accepted_tables) == 1
+    table = result.accepted_tables[0]
+    date_column = next(c for c in table.columns if c.name == "日期")
+    assert date_column.type == "date"
+    assert date_column.date_precisions == ("year", "month", "minute")
+    assert not result.issues
+
+    records = result.records_for("page.html")
+    assert records[0]["values"]["日期"] == "2026"
+    assert records[0]["date_precision"] == {"日期": "year"}
+    assert records[1]["values"]["日期"] == "2026-01"
+    assert records[1]["date_precision"] == {"日期": "month"}
+    # 整日精度是基准形态，不额外标注
+    assert records[2]["values"]["日期"] == "2026-01-02"
+    assert "date_precision" not in records[2]
+    assert records[3]["values"]["日期"] == "2026-01-03T08:00"
+    assert records[3]["date_precision"] == {"日期": "minute"}
+
+    # 报告摘要中可区分列内的非整日精度
+    summary = summary_for_golden(result)
+    summary_column = summary["tables"][0]["columns"][1]
+    assert summary_column["name"] == "日期"
+    assert summary_column["date_precisions"] == ["year", "month", "minute"]
+
+
+def test_mixed_date_column_keeps_unparsable_issue(config_factory, tmp_path):
+    html = """<html><body>
+<table>
+  <thead><tr><th>名称</th><th>日期</th></tr></thead>
+  <tbody>
+    <tr><td>甲</td><td>2026-01</td></tr>
+    <tr><td>乙</td><td>2026-01-02</td></tr>
+    <tr><td>丙</td><td>2026/01/03 08:00</td></tr>
+    <tr><td>丁</td><td>不是日期</td></tr>
+  </tbody>
+</table>
+</body></html>"""
+    config = config_factory(input_dir=_write_page(tmp_path, html))
+    result = build_run(config, FIXED_NOW)
+    table = result.accepted_tables[0]
+    date_column = next(c for c in table.columns if c.name == "日期")
+    assert date_column.type == "date"
+    assert date_column.match_ratio == 0.75
+
+    records = result.records_for("page.html")
+    # 无法解析的值保留原文，issue 结构不变
+    assert records[3]["values"]["日期"] == "不是日期"
+    assert "date_precision" not in records[3]
+    assert result.issues == [
+        {
+            "source_file": "page.html",
+            "table_index": 0,
+            "row_index": 3,
+            "col_name": "日期",
+            "reason": "date_unparsable",
+        }
+    ]
+
+
+def test_date_precision_persisted_in_sqlite(config_factory, tmp_path):
+    html = """<html><body>
+<table>
+  <thead><tr><th>名称</th><th>日期</th></tr></thead>
+  <tbody>
+    <tr><td>甲</td><td>2026-01</td></tr>
+    <tr><td>乙</td><td>2026-01-02</td></tr>
+    <tr><td>丙</td><td>2026-01-03</td></tr>
+  </tbody>
+</table>
+</body></html>"""
+    config = config_factory(input_dir=_write_page(tmp_path, html))
+    result = execute_run(config, now=FIXED_NOW)
+    store = Store(config.database)
+    assert store.count_records(result.run_id) == 3
+    with store.connect() as connection:
+        rows = connection.execute(
+            "SELECT row_index, data_json FROM records WHERE run_id = ?"
+            " ORDER BY row_index",
+            (result.run_id,),
+        ).fetchall()
+    payloads = [json.loads(row["data_json"]) for row in rows]
+    assert payloads[0]["date_precision"] == {"日期": "month"}
+    assert payloads[0]["values"]["日期"] == "2026-01"
+    assert "date_precision" not in payloads[1]
+    assert "date_precision" not in payloads[2]

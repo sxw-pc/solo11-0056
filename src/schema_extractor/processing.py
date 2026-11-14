@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from .config import AppConfig
+from .config import AppConfig, NormalizationOptions
 from .evidence import EvidenceRecord, build_evidence
 from .header_infer import ColumnProfile, infer_columns
 from .models import RunResult, TableResult
-from .normalize import normalize_cell
+from .normalize import date_precision_of, normalize_cell
 from .tables import TableCandidate
 
 
@@ -30,14 +30,21 @@ def build_record(
     row_index: int,
     row: list[str | None],
     columns: list[ColumnProfile],
-    date_formats: tuple[str, ...],
+    normalization: NormalizationOptions,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     values: dict[str, str] = {}
     units: dict[str, str] = {}
+    date_precision: dict[str, str] = {}
     issues: list[dict[str, Any]] = []
     for index, column in enumerate(columns):
         raw = row[index] if index < len(row) else None
-        normalized, unit, reason = normalize_cell(raw, column.type, date_formats)
+        normalized, unit, reason = normalize_cell(
+            raw,
+            column.type,
+            normalization.date_formats,
+            partial_date_formats=normalization.partial_date_formats,
+            time_formats=normalization.time_formats,
+        )
         values[column.name] = normalized
         if unit:
             units[column.name] = unit
@@ -45,6 +52,16 @@ def build_record(
             issues.append(
                 table_issue(table_index, source_file, row_index, column.name, reason)
             )
+        elif column.type == "date" and normalized:
+            precision = date_precision_of(
+                raw,
+                normalization.date_formats,
+                partial_date_formats=normalization.partial_date_formats,
+                time_formats=normalization.time_formats,
+            )
+            # day 为基准精度不标注；只记录年/月/时分秒等非整日粒度。
+            if precision is not None and precision != "day":
+                date_precision[column.name] = precision
     record = {
         "source_file": source_file,
         "table_index": table_index,
@@ -52,6 +69,8 @@ def build_record(
         "values": values,
         "units": units,
     }
+    if date_precision:
+        record["date_precision"] = date_precision
     return record, issues
 
 
@@ -77,7 +96,7 @@ def process_table(
             row_index,
             row,
             columns,
-            config.normalization.date_formats,
+            config.normalization,
         )
         records.append(record)
         issues.extend(row_issues)
@@ -140,15 +159,16 @@ def snapshot_rows(
                 }
             )
         for record in table.records:
-            records.append(
-                {
-                    "run_id": result.run_id,
-                    "source_file": table.source_file,
-                    "table_index": table.table_index,
-                    "row_index": record["row_index"],
-                    "values": record["values"],
-                    "units": record["units"],
-                }
-            )
+            row: dict[str, Any] = {
+                "run_id": result.run_id,
+                "source_file": table.source_file,
+                "table_index": table.table_index,
+                "row_index": record["row_index"],
+                "values": record["values"],
+                "units": record["units"],
+            }
+            if record.get("date_precision"):
+                row["date_precision"] = record["date_precision"]
+            records.append(row)
     issues = [{"run_id": result.run_id, **issue} for issue in result.issues]
     return tables, columns, records, issues

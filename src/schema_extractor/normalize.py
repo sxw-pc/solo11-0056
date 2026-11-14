@@ -10,6 +10,11 @@ from datetime import datetime
 from decimal import Decimal, InvalidOperation
 
 DEFAULT_DATE_FORMATS = ("%Y-%m-%d", "%Y/%m/%d", "%Y年%m月%d日")
+DEFAULT_PARTIAL_DATE_FORMATS = ("%Y-%m", "%Y/%m", "%Y年%m月", "%Y", "%Y年")
+DEFAULT_TIME_FORMATS = ("%H:%M:%S", "%H:%M")
+
+# 日期规范值的粒度：年、年月、年月日、年月日时分、年月日时分秒。
+DATE_PRECISIONS = ("year", "month", "day", "minute", "second")
 
 _WS = re.compile(r"\s+")
 _NUMBER = r"[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?"
@@ -96,19 +101,134 @@ def parse_currency(raw: str) -> tuple[Decimal, str] | None:
     return number, unit
 
 
-def parse_date(
-    raw: str, formats: tuple[str, ...] | list[str] = DEFAULT_DATE_FORMATS
-) -> str | None:
-    """按配置顺序尝试日期格式，成功时返回 ISO 日期。"""
+_BARE_YEAR_FORMATS = frozenset({"%Y", "%y"})
+_BARE_YEAR_RE = re.compile(r"\d{4}")
+
+
+def date_format_precision(date_format: str) -> str:
+    """由 strptime 指令推导精度；只识别 %Y/%m/%d/%H(%I)/%M/%S 这一族。"""
+    if "%S" in date_format or "%f" in date_format:
+        return "second"
+    if any(directive in date_format for directive in ("%H", "%I", "%M")):
+        return "minute"
+    if "%d" in date_format:
+        return "day"
+    if "%m" in date_format:
+        return "month"
+    return "year"
+
+
+def _render_precision(moment: datetime, precision: str) -> str:
+    """按命中精度输出规范值，不向上补零（年不补月、分不补秒）。"""
+    if precision == "year":
+        return f"{moment.year:04d}"
+    if precision == "month":
+        return f"{moment.year:04d}-{moment.month:02d}"
+    day = moment.date().isoformat()
+    if precision == "day":
+        return day
+    if precision == "minute":
+        return f"{day}T{moment.hour:02d}:{moment.minute:02d}"
+    return f"{day}T{moment.hour:02d}:{moment.minute:02d}:{moment.second:02d}"
+
+
+def _date_candidates(
+    formats: tuple[str, ...] | list[str],
+    partial_date_formats: tuple[str, ...] | list[str],
+    time_formats: tuple[str, ...] | list[str],
+) -> list[tuple[str, str]]:
+    """展开为 (格式, 精度) 候选序列，保持稳定顺序并去重。"""
+    candidates: list[tuple[str, str]] = []
+    seen: set[str] = set()
+
+    def add(date_format: str, precision: str) -> None:
+        if date_format not in seen:
+            seen.add(date_format)
+            candidates.append((date_format, precision))
+
+    for date_format in formats:
+        add(date_format, date_format_precision(date_format))
+    day_formats = [
+        date_format
+        for date_format in formats
+        if date_format_precision(date_format) == "day"
+    ]
+    for day_format in day_formats:
+        for time_format in time_formats:
+            precision = date_format_precision(time_format)
+            if precision not in {"minute", "second"}:
+                continue
+            for separator in (" ", "T"):
+                add(f"{day_format}{separator}{time_format}", precision)
+    for date_format in partial_date_formats:
+        precision = date_format_precision(date_format)
+        if precision in {"minute", "second"}:
+            continue
+        add(date_format, precision)
+    return candidates
+
+
+def parse_date_precise(
+    raw: str,
+    formats: tuple[str, ...] | list[str] = DEFAULT_DATE_FORMATS,
+    *,
+    partial_date_formats: tuple[str, ...] | list[str] = DEFAULT_PARTIAL_DATE_FORMATS,
+    time_formats: tuple[str, ...] | list[str] = DEFAULT_TIME_FORMATS,
+) -> tuple[str, str] | None:
+    """按配置顺序尝试日期格式，成功时返回 (规范值, 精度)。
+
+    依次尝试：整日格式（date_formats）、整日+时分秒组合、部分精度格式
+    （partial_date_formats）。规范值按输入实际粒度输出，不补零到整日、
+    不补时秒；精度为 DATE_PRECISIONS 之一。全部失败返回 None。
+    """
     text = clean_text(raw)
     if not text:
         return None
-    for date_format in formats:
+    for date_format, precision in _date_candidates(
+        formats, partial_date_formats, time_formats
+    ):
+        if date_format in _BARE_YEAR_FORMATS and _BARE_YEAR_RE.fullmatch(text) is None:
+            continue
         try:
-            return datetime.strptime(text, date_format).date().isoformat()
+            moment = datetime.strptime(text, date_format)
         except ValueError:
             continue
+        return _render_precision(moment, precision), precision
     return None
+
+
+def parse_date(
+    raw: str,
+    formats: tuple[str, ...] | list[str] = DEFAULT_DATE_FORMATS,
+    *,
+    partial_date_formats: tuple[str, ...] | list[str] = DEFAULT_PARTIAL_DATE_FORMATS,
+    time_formats: tuple[str, ...] | list[str] = DEFAULT_TIME_FORMATS,
+) -> str | None:
+    """按配置顺序尝试日期格式，成功时返回规范值（粒度与输入一致）。"""
+    parsed = parse_date_precise(
+        raw,
+        formats,
+        partial_date_formats=partial_date_formats,
+        time_formats=time_formats,
+    )
+    return parsed[0] if parsed is not None else None
+
+
+def date_precision_of(
+    raw: str,
+    formats: tuple[str, ...] | list[str] = DEFAULT_DATE_FORMATS,
+    *,
+    partial_date_formats: tuple[str, ...] | list[str] = DEFAULT_PARTIAL_DATE_FORMATS,
+    time_formats: tuple[str, ...] | list[str] = DEFAULT_TIME_FORMATS,
+) -> str | None:
+    """返回命中格式的精度；无法解析时返回 None。"""
+    parsed = parse_date_precise(
+        raw,
+        formats,
+        partial_date_formats=partial_date_formats,
+        time_formats=time_formats,
+    )
+    return parsed[1] if parsed is not None else None
 
 
 def is_integer(raw: str) -> bool:
@@ -129,14 +249,31 @@ def is_currency(raw: str) -> bool:
     return parse_currency(raw) is not None
 
 
-def is_date(raw: str, formats: tuple[str, ...] | list[str] = DEFAULT_DATE_FORMATS) -> bool:
-    return parse_date(raw, formats) is not None
+def is_date(
+    raw: str,
+    formats: tuple[str, ...] | list[str] = DEFAULT_DATE_FORMATS,
+    *,
+    partial_date_formats: tuple[str, ...] | list[str] = DEFAULT_PARTIAL_DATE_FORMATS,
+    time_formats: tuple[str, ...] | list[str] = DEFAULT_TIME_FORMATS,
+) -> bool:
+    return (
+        parse_date_precise(
+            raw,
+            formats,
+            partial_date_formats=partial_date_formats,
+            time_formats=time_formats,
+        )
+        is not None
+    )
 
 
 def normalize_cell(
     value: object,
     type_name: str,
     date_formats: tuple[str, ...] | list[str] = DEFAULT_DATE_FORMATS,
+    *,
+    partial_date_formats: tuple[str, ...] | list[str] = DEFAULT_PARTIAL_DATE_FORMATS,
+    time_formats: tuple[str, ...] | list[str] = DEFAULT_TIME_FORMATS,
 ) -> tuple[str, str, str | None]:
     """返回 (规范化值, 单位标注, 失败原因)。
 
@@ -161,7 +298,12 @@ def normalize_cell(
             return text, "", "number_unparsable"
         return canonical_decimal(parsed[0]), parsed[1], None
     if type_name == "date":
-        normalized = parse_date(text, date_formats)
+        normalized = parse_date(
+            text,
+            date_formats,
+            partial_date_formats=partial_date_formats,
+            time_formats=time_formats,
+        )
         if normalized is None:
             return text, "", "date_unparsable"
         return normalized, "", None

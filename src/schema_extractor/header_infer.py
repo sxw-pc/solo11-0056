@@ -5,7 +5,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .config import InferenceOptions, NormalizationOptions
-from .normalize import clean_text, is_currency, is_date, is_decimal, is_integer, is_percent
+from .normalize import (
+    DATE_PRECISIONS,
+    clean_text,
+    date_precision_of,
+    is_currency,
+    is_decimal,
+    is_integer,
+    is_percent,
+)
 
 TYPE_ORDER = (
     "identifier",
@@ -26,15 +34,20 @@ class ColumnProfile:
     match_ratio: float
     sample_values: list[str]
     unnamed: bool
+    date_precisions: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, object]:
-        return {
+        payload: dict[str, object] = {
             "name": self.name,
             "type": self.type,
             "match_ratio": self.match_ratio,
             "sample_values": list(self.sample_values),
             "unnamed": self.unnamed,
         }
+        # 只记录非整日精度（day 为基准精度），无则省略以保持输出稳定。
+        if self.date_precisions:
+            payload["date_precisions"] = list(self.date_precisions)
+        return payload
 
 
 def _ratio(matches: int, total: int) -> float:
@@ -68,8 +81,20 @@ def infer_column(
         return ColumnProfile(name, "text", non_empty_ratio, samples, unnamed)
 
     formats = normalization.date_formats
+    partial = normalization.partial_date_formats
+    time_formats = normalization.time_formats
+    date_hits: list[str] = []
+    for value in non_empty:
+        precision = date_precision_of(
+            value,
+            formats,
+            partial_date_formats=partial,
+            time_formats=time_formats,
+        )
+        if precision is not None:
+            date_hits.append(precision)
     checks: list[tuple[str, int]] = [
-        ("date", sum(1 for value in non_empty if is_date(value, formats))),
+        ("date", len(date_hits)),
         ("percent", sum(1 for value in non_empty if is_percent(value))),
         ("currency", sum(1 for value in non_empty if is_currency(value))),
         ("integer", sum(1 for value in non_empty if is_integer(value))),
@@ -93,7 +118,15 @@ def infer_column(
     for type_name, matches in checks:
         ratio = _ratio(matches, len(non_empty))
         if ratio >= options.min_match_ratio:
-            return ColumnProfile(name, type_name, ratio, samples, unnamed)
+            date_precisions: tuple[str, ...] = ()
+            if type_name == "date":
+                non_day = {hit for hit in date_hits if hit != "day"}
+                date_precisions = tuple(
+                    precision for precision in DATE_PRECISIONS if precision in non_day
+                )
+            return ColumnProfile(
+                name, type_name, ratio, samples, unnamed, date_precisions
+            )
     if _enum_like(non_empty, options):
         return ColumnProfile(name, "enum", 1.0, samples, unnamed)
     return ColumnProfile(name, "text", non_empty_ratio, samples, unnamed)

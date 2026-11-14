@@ -91,6 +91,9 @@ class Store:
             units = row.pop("units", {})
             if units:
                 payload["units"] = units
+            date_precision = row.pop("date_precision", {})
+            if date_precision:
+                payload["date_precision"] = date_precision
             row["data_json"] = json.dumps(
                 payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
             )

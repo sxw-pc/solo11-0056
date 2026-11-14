@@ -74,7 +74,13 @@ python -m schema_extractor.cli run --config configs/default.yaml \
 | `inference.max_enum_cardinality` | `8` | `enum` 允许的最大不同值数。 |
 | `inference.max_sample_values` | `3` | 每列保存的样例值数量。 |
 | `inference.identifier_pattern` | 字母前缀编号正则 | `identifier` 类型的整值匹配规则。 |
-| `normalization.date_formats` | `%Y-%m-%d`、`%Y/%m/%d`、`%Y年%m月%d日` | 日期解析尝试顺序。 |
+| `normalization.date_formats` | `%Y-%m-%d`、`%Y/%m/%d`、`%Y年%m月%d日` | 整日日期解析尝试顺序。 |
+| `normalization.partial_date_formats` | `%Y-%m`、`%Y/%m`、`%Y年%m月`、`%Y`、`%Y年` | 部分精度（年、年月）格式；规范值按输入粒度输出，不补零到整日。置空列表可停用。 |
+| `normalization.time_formats` | `%H:%M:%S`、`%H:%M` | 整日日期后可跟的时分秒格式；规范值不补秒。置空列表可停用。 |
+
+日期列支持年、年月、年月日及可选时分秒；命中精度为 `year`/`month`/`minute`/`second` 时，
+记录的 `date_precision` 字段与报告列的 `date_precisions` 会标注实际粒度（整日 `day` 为基准精度，不标注）。
+无法解析的值保留原文并产生 `date_unparsable` issue。
 
 `configs/strict.yaml` 是更严格的示例：至少 2 行、至少 3 列，类型匹配阈值提高到 0.9。
 
