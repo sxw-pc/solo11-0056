@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><title>多级表头</title></head>
+<body>
+  <h1>多级表头示例</h1>
+  <table id="limits">
+    <caption>金额上下限</caption>
+    <thead>
+      <tr>
+        <th rowspan="2">项目</th>
+        <th colspan="2">金额</th>
+        <th rowspan="2">备注</th>
+      </tr>
+      <tr>
+        <th>上限</th>
+        <th>下限</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td>示例甲</td><td>1,000</td><td>100</td><td>虚构数据</td></tr>
+      <tr><td>示例乙</td><td>2,000</td><td>200</td><td></td></tr>
+    </tbody>
+  </table>
+  <p>用于验证按网格位置构造的层级列名。</p>
+</body>
+</html>

@@ -139,7 +139,7 @@
         },
         {
           "match_ratio": 1.0,
-          "name": "销售额",
+          "name": "指标/销售额",
           "sample_values": [
             "1,000",
             "800",
@@ -150,7 +150,7 @@
         },
         {
           "match_ratio": 1.0,
-          "name": "同比",
+          "name": "指标/同比",
           "sample_values": [
             "5%",
             "-2.5%",

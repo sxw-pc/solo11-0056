@@ -73,20 +73,28 @@ def _span(cell: Node, name: str, default: int = 1) -> int:
     return max(1, min(int(raw), 1000))
 
 
-def _build_grid(rows: list[Node]) -> list[list[str | None]]:
-    """把行展开为矩形网格；rowspan/colspan 覆盖位复制值，缺失位为 None。"""
-    grid: list[list[str | None]] = []
-    pending: dict[int, tuple[int, str]] = {}
+_GridCell = tuple[str, int]
+
+
+def _expand_grid(rows: list[Node]) -> list[list[_GridCell | None]]:
+    """把行展开为矩形网格，并保留每个网格位的源单元格标识。
+
+    同一单元格的 colspan/rowspan 覆盖位共享同一个源标识，便于表头构造
+    层级时识别“同一单元格”的重复覆盖，而不是把它当成新的一层。
+    """
+    grid: list[list[_GridCell | None]] = []
+    pending: dict[int, tuple[int, _GridCell]] = {}
+    next_origin = 0
     for row in rows:
-        cells: list[str | None] = []
-        still_pending: dict[int, tuple[int, str]] = {}
+        cells: list[_GridCell | None] = []
+        still_pending: dict[int, tuple[int, _GridCell]] = {}
         for column in sorted(pending):
-            remaining, value = pending[column]
+            remaining, cell = pending[column]
             while len(cells) <= column:
                 cells.append(None)
-            cells[column] = value
+            cells[column] = cell
             if remaining > 1:
-                still_pending[column] = (remaining - 1, value)
+                still_pending[column] = (remaining - 1, cell)
         pending = still_pending
         cursor = 0
         for cell in row.children:
@@ -96,7 +104,9 @@ def _build_grid(rows: list[Node]) -> list[list[str | None]]:
                 cursor += 1
             colspan = _span(cell, "colspan")
             rowspan = _span(cell, "rowspan")
-            value = _cell_text(cell)
+            origin = next_origin
+            next_origin += 1
+            value = (_cell_text(cell), origin)
             for offset in range(colspan):
                 column = cursor + offset
                 while len(cells) <= column:
@@ -110,6 +120,14 @@ def _build_grid(rows: list[Node]) -> list[list[str | None]]:
     for row in grid:
         row.extend([None] * (width - len(row)))
     return grid
+
+
+def _build_grid(rows: list[Node]) -> list[list[str | None]]:
+    """把行展开为矩形网格；rowspan/colspan 覆盖位复制值，缺失位为 None。"""
+    return [
+        [cell[0] if cell is not None else None for cell in row]
+        for row in _expand_grid(rows)
+    ]
 
 
 def _rows_text(row: Node) -> str:
@@ -141,17 +159,53 @@ def _caption(table: Node) -> str:
     return _cell_text(caption)
 
 
-def _header_names(header_grid: list[list[str | None]], width: int) -> tuple[list[str], list[bool]]:
-    raw_names: list[str] = []
-    unnamed: list[bool] = []
+def _cell_fields(cell: object) -> tuple[str, int | None]:
+    """取出网格位文本；内部网格还带有源单元格标识（origin）。"""
+    if isinstance(cell, tuple):
+        text, origin = cell
+        return str(text), int(origin)
+    return str(cell), None
+
+
+def _header_paths(
+    header_grid: list[list[object]], width: int
+) -> list[list[str]]:
+    """按网格位置自顶向下收拢每个数据列的表头层级。
+
+    - 上层分组（colspan/rowspan 单元格）的文本会下推给其覆盖的每一列；
+    - 同一源单元格的覆盖位共享 origin，只在首次覆盖时计入层级，因此 rowspan
+      延续到后续行时不会重复成为一个新层级；
+    - 空文本单元格不产生新的层级，但仍保留其上级分组（路径只剩上级分组）；
+    - 层级顺序即原始表头行顺序，最终以 "/" 拼接为路径式列名。
+    """
+    paths: list[list[str]] = []
     for column in range(width):
-        value = ""
+        parts: list[str] = []
+        last_origin: int | None = None
         for row in header_grid:
-            candidate = row[column] if column < len(row) else None
-            if candidate is not None and candidate.strip():
-                value = candidate
-        raw_names.append(_WHITESPACE.sub(" ", value).strip())
-        unnamed.append(not bool(value.strip()))
+            cell = row[column] if column < len(row) else None
+            if cell is None:
+                continue
+            text, origin = _cell_fields(cell)
+            value = _WHITESPACE.sub(" ", text).strip()
+            if origin is not None and origin == last_origin:
+                # 同一源单元格的 rowspan 覆盖位：不重复成为新层级。
+                continue
+            if origin is not None:
+                last_origin = origin
+            elif parts and value == parts[-1]:
+                # 纯文本网格无法区分源单元格：相邻重复文本视为 span 覆盖。
+                continue
+            if value:
+                parts.append(value)
+        paths.append(parts)
+    return paths
+
+
+def _uniquify_paths(paths: list[list[str]]) -> tuple[list[str], list[bool]]:
+    """把路径层级拼成 "/" 列名，并沿用既有的唯一化与 col_N 兜底规则。"""
+    raw_names = ["/".join(parts) for parts in paths]
+    unnamed = [not parts for parts in paths]
     names: list[str] = []
     used: dict[str, int] = {}
     for index, raw in enumerate(raw_names):
@@ -165,6 +219,13 @@ def _header_names(header_grid: list[list[str | None]], width: int) -> tuple[list
             name = f"{base}_{count}"
         names.append(name)
     return names, unnamed
+
+
+def _header_names(
+    header_grid: list[list[object]], width: int
+) -> tuple[list[str], list[bool]]:
+    """把表头网格转为路径式列名，并沿用既有的唯一化规则。"""
+    return _uniquify_paths(_header_paths(header_grid, width))
 
 
 def _pad_rows(rows: list[list[str | None]], width: int) -> list[list[str | None]]:
@@ -185,7 +246,7 @@ def _parse_candidate(
     notes: list[str],
 ) -> TableCandidate:
     header_rows, data_row_nodes, has_header = _split_header_rows(node, selector)
-    header_grid = _build_grid(header_rows)
+    header_grid = _expand_grid(header_rows)
     data_grid = _build_grid(data_row_nodes)
     width = max(
         max((len(row) for row in header_grid), default=0),

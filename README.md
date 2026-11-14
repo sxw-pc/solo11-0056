@@ -89,13 +89,14 @@ python -m schema_extractor.cli run --config configs/default.yaml \
 │   └── strict.yaml
 ├── fixtures/
 │   ├── inputs/                 # 6 个虚构 HTML 归档
+│   ├── multilevel/             # 1 个多级表头归档
 │   └── expected/               # 2 份 records.jsonl + 1 份 summary.golden.json
 ├── scripts/run_all.sh
 ├── src/schema_extractor/
 │   ├── cli.py                  # run / serve / show / list-runs
 │   ├── config.py               # YAML 合并、校验、稳定哈希
 │   ├── dom.py                  # html.parser 轻量 DOM
-│   ├── tables.py               # 表格识别、表头、span 网格展开
+│   ├── tables.py               # 表格识别、层级表头、span 网格展开
 │   ├── header_infer.py         # 确定性列类型推断
 │   ├── normalize.py            # 数字/日期/文本规范化
 │   ├── pipeline.py             # 编排、run_id、输出
@@ -140,6 +141,7 @@ SQLite 使用 5 张表，schema 内联在 `storage.py` 的 `SCHEMA` 常量中：
 - 百分比保留数值、单位记为 `%`；货币单位映射为 `CNY` / `USD` / `EUR`。
 - 日期统一为 `YYYY-MM-DD`；失败时保留清理后的原文并产生 issue，不抛异常。
 - 文本清理首尾空白并合并连续空白；空单元格统一为 `""`。
+- 多行表头按网格位置构造层级列名：上层分组名下推给其覆盖的每个子列，路径以 `/` 拼接（如 `金额/上限`）。`rowspan` 覆盖位不重复成为层级；空子列仍归属其上级分组。单行表头输出保持不变，`col_N` 兜底与唯一化规则沿用原行为。
 
 ## 证据与确定性
 
@@ -154,7 +156,7 @@ SQLite 使用 5 张表，schema 内联在 `storage.py` 的 `SCHEMA` 常量中：
 pytest -q
 ```
 
-测试覆盖 DOM 解析、表格识别与 span 展开、列推断、规范化、证据、SQLite 幂等、报告、CLI 子进程、Flask 只读服务和 golden 文件逐行比较。`test_offline_guard.py` 在禁用出站 socket 与 `urlopen` 的条件下跑完整管线。所有测试只写 `tmp_path`。
+测试覆盖 DOM 解析、表格识别与 span 展开、多级表头层级列名、列推断、规范化、证据、SQLite 幂等、报告、CLI 子进程、Flask 只读服务和 golden 文件逐行比较。`test_offline_guard.py` 在禁用出站 socket 与 `urlopen` 的条件下跑完整管线。所有测试只写 `tmp_path`。
 
 ## 已知限制与不实现清单
 
@@ -168,7 +170,7 @@ pytest -q
 - 不实现 CSV/Excel 导入。
 - 不实现 Parquet / Avro 等列式格式导出。
 - 不实现写入型 API、上传服务或远程监听。
-- 不自动推断合并单元格的跨列业务含义；span 只展开为矩形网格。
+- 不自动推断合并单元格的跨列业务含义；span 只展开为矩形网格，表头层级仅按网格位置下推分组名。
 
 ## 演进方向
 

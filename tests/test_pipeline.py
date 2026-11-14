@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 import pytest
 
@@ -161,3 +162,50 @@ def test_file_glob_limits_the_input_set(config_factory):
     assert result.tables_detected == 1
     assert result.records_written == 4
     assert result.records_for("page_01.html")
+
+
+def test_multilevel_header_paths_flow_through_records_and_columns(
+    config_factory, tmp_path
+):
+    multilevel = tmp_path / "multilevel"
+    multilevel.mkdir()
+    (multilevel / "page_07.html").write_text(
+        (
+            Path(__file__).resolve().parents[1]
+            / "fixtures"
+            / "multilevel"
+            / "page_07_multilevel.html"
+        ).read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    config = config_factory(input_dir=str(multilevel))
+    result = execute_run(config, now=FIXED_NOW)
+    assert result.records_written == 2
+    table = result.accepted_tables[0]
+    assert [column.name for column in table.columns] == [
+        "项目",
+        "金额/上限",
+        "金额/下限",
+        "备注",
+    ]
+    first = table.records[0]
+    assert first["values"] == {
+        "项目": "示例甲",
+        "金额/上限": "1000",
+        "金额/下限": "100",
+        "备注": "虚构数据",
+    }
+    store = Store(config.database)
+    stored_columns = store.columns_for_run(result.run_id)
+    assert [row["name"] for row in stored_columns] == [
+        "项目",
+        "金额/上限",
+        "金额/下限",
+        "备注",
+    ]
+    stored_records = store.connect().execute(
+        "SELECT data_json FROM records WHERE run_id = ? ORDER BY row_index",
+        (result.run_id,),
+    ).fetchall()
+    assert json.loads(stored_records[0]["data_json"])["values"]["金额/下限"] == "100"
+    assert "金额/上限" in config.report_json.read_text(encoding="utf-8")
