@@ -1,0 +1,3 @@
+{"row_index": 0, "source_file": "page_02.html", "table_index": 0, "units": {"同比": "%"}, "values": {"区域": "华东", "同比": "5", "日期": "2026-02-03", "销售额": "1000"}}
+{"row_index": 1, "source_file": "page_02.html", "table_index": 0, "units": {"同比": "%"}, "values": {"区域": "华东", "同比": "-2.5", "日期": "2026-02-04", "销售额": "800"}}
+{"row_index": 2, "source_file": "page_02.html", "table_index": 0, "units": {"同比": "%"}, "values": {"区域": "华南", "同比": "0", "日期": "2026-02-05", "销售额": "600.5"}}

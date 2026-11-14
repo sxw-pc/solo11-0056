@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><title>嵌套表格</title></head>
+<body>
+  <h1>嵌套表格示例</h1>
+  <table class="outer">
+    <caption>外层清单</caption>
+    <thead>
+      <tr><th>名称</th><th>数量</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>外层甲</td>
+        <td>100</td>
+      </tr>
+      <tr>
+        <td>
+          外层乙
+          <table class="inner">
+            <thead><tr><th>内层字段</th><th>内层值</th></tr></thead>
+            <tbody>
+              <tr><td>内层甲</td><td>1</td></tr>
+              <tr><td>内层乙</td><td>2</td></tr>
+            </tbody>
+          </table>
+        </td>
+        <td>200</td>
+      </tr>
+    </tbody>
+  </table>
+  <p>内层表格默认忽略，并进入 notes。</p>
+</body>
+</html>

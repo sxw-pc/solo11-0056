@@ -1,0 +1,30 @@
+# 更严格的抽取配置：表更大、列更多、类型匹配要求更高。
+project_name: 标程抽取台
+input_dir: fixtures/inputs
+file_glob: "*.html"
+output_dir: build/strict
+database: build/strict/runs.sqlite3
+evidence_dir: build/strict/evidence
+evidence_index: build/strict/evidence.json
+report_md: build/strict/report.md
+report_json: build/strict/report.json
+
+table_selector:
+  min_rows: 2
+  min_cols: 3
+  require_header: true
+  header_hint_regex: "^(?:序号|编号|ID|名称|项目|日期|金额|数量|比例|状态|类型|区域|指标|单位)"
+  nested_table_policy: skip
+
+inference:
+  min_match_ratio: 0.9
+  min_non_empty_ratio: 0.75
+  max_enum_cardinality: 4
+  max_sample_values: 3
+  identifier_pattern: "^[A-Za-z]{1,12}[-_]?\\d{2,}(?:[-_]\\d+)*$"
+
+normalization:
+  date_formats:
+    - "%Y-%m-%d"
+    - "%Y/%m/%d"
+    - "%Y年%m月%d日"

@@ -1,0 +1,344 @@
+{
+  "column_type_distribution": {
+    "currency": 1,
+    "date": 3,
+    "decimal": 1,
+    "enum": 3,
+    "identifier": 2,
+    "integer": 4,
+    "percent": 2,
+    "text": 4
+  },
+  "evidence_coverage": {
+    "ratio": 1.0,
+    "tables_total": 5,
+    "tables_with_hash": 5
+  },
+  "files": [
+    {
+      "records": 4,
+      "source_file": "page_01.html",
+      "tables_accepted": 1,
+      "tables_detected": 1
+    },
+    {
+      "records": 3,
+      "source_file": "page_02.html",
+      "tables_accepted": 1,
+      "tables_detected": 1
+    },
+    {
+      "records": 2,
+      "source_file": "page_03_nested.html",
+      "tables_accepted": 1,
+      "tables_detected": 2
+    },
+    {
+      "records": 4,
+      "source_file": "page_04_messy.html",
+      "tables_accepted": 1,
+      "tables_detected": 1
+    },
+    {
+      "records": 0,
+      "source_file": "page_05_no_table.html",
+      "tables_accepted": 0,
+      "tables_detected": 0
+    },
+    {
+      "records": 3,
+      "source_file": "page_06_mixed.html",
+      "tables_accepted": 1,
+      "tables_detected": 3
+    }
+  ],
+  "files_scanned": 6,
+  "issues_by_reason": {
+    "date_unparsable": 1
+  },
+  "issues_count": 1,
+  "records_written": 16,
+  "tables": [
+    {
+      "column_count": 5,
+      "columns": [
+        {
+          "match_ratio": 1.0,
+          "name": "项目编号",
+          "sample_values": [
+            "A-1001",
+            "A-1002",
+            "A-1003"
+          ],
+          "type": "identifier",
+          "unnamed": false
+        },
+        {
+          "match_ratio": 1.0,
+          "name": "项目名称",
+          "sample_values": [
+            "示例 项目 甲",
+            "示例项目乙",
+            "示例项目丙"
+          ],
+          "type": "text",
+          "unnamed": false
+        },
+        {
+          "match_ratio": 1.0,
+          "name": "合同金额",
+          "sample_values": [
+            "¥1,234.50",
+            "¥2,000",
+            "300元"
+          ],
+          "type": "currency",
+          "unnamed": false
+        },
+        {
+          "match_ratio": 1.0,
+          "name": "完成率",
+          "sample_values": [
+            "12.5%",
+            "80%",
+            "0%"
+          ],
+          "type": "percent",
+          "unnamed": false
+        },
+        {
+          "match_ratio": 1.0,
+          "name": "更新日期",
+          "sample_values": [
+            "2026-01-02",
+            "2026/01/03",
+            "2026年1月4日"
+          ],
+          "type": "date",
+          "unnamed": false
+        }
+      ],
+      "evidence_hash": "d2992cea9d100e242165cb8970cef0137472a0b8198e0603d3e5bfeb2b4ba96a",
+      "row_count": 4,
+      "source_file": "page_01.html",
+      "table_index": 0
+    },
+    {
+      "column_count": 4,
+      "columns": [
+        {
+          "match_ratio": 1.0,
+          "name": "区域",
+          "sample_values": [
+            "华东",
+            "华东",
+            "华南"
+          ],
+          "type": "enum",
+          "unnamed": false
+        },
+        {
+          "match_ratio": 1.0,
+          "name": "销售额",
+          "sample_values": [
+            "1,000",
+            "800",
+            "600.50"
+          ],
+          "type": "decimal",
+          "unnamed": false
+        },
+        {
+          "match_ratio": 1.0,
+          "name": "同比",
+          "sample_values": [
+            "5%",
+            "-2.5%",
+            "0%"
+          ],
+          "type": "percent",
+          "unnamed": false
+        },
+        {
+          "match_ratio": 1.0,
+          "name": "日期",
+          "sample_values": [
+            "2026/2/3",
+            "2026-02-04",
+            "2026年2月5日"
+          ],
+          "type": "date",
+          "unnamed": false
+        }
+      ],
+      "evidence_hash": "df20aff54b492521a08933a269954e3908c92e7103527e43c5323c43c28b04f1",
+      "row_count": 3,
+      "source_file": "page_02.html",
+      "table_index": 0
+    },
+    {
+      "column_count": 2,
+      "columns": [
+        {
+          "match_ratio": 1.0,
+          "name": "名称",
+          "sample_values": [
+            "外层甲",
+            "外层乙"
+          ],
+          "type": "enum",
+          "unnamed": false
+        },
+        {
+          "match_ratio": 1.0,
+          "name": "数量",
+          "sample_values": [
+            "100"
+          ],
+          "type": "integer",
+          "unnamed": false
+        }
+      ],
+      "evidence_hash": "9477449d6a3987e9d81943c42ecbdcf4a968133707ba4567e3148544ea10324c",
+      "row_count": 2,
+      "source_file": "page_03_nested.html",
+      "table_index": 0
+    },
+    {
+      "column_count": 6,
+      "columns": [
+        {
+          "match_ratio": 1.0,
+          "name": "编号",
+          "sample_values": [
+            "B-2001",
+            "B-2002",
+            "B-2003"
+          ],
+          "type": "identifier",
+          "unnamed": false
+        },
+        {
+          "match_ratio": 1.0,
+          "name": "名称",
+          "sample_values": [
+            "示例 记录 一",
+            "示例记录二",
+            "示例记录三 补充说明"
+          ],
+          "type": "text",
+          "unnamed": false
+        },
+        {
+          "match_ratio": 1.0,
+          "name": "col_3",
+          "sample_values": [
+            "备注一",
+            "备注二",
+            "备注三"
+          ],
+          "type": "text",
+          "unnamed": true
+        },
+        {
+          "match_ratio": 1.0,
+          "name": "金额",
+          "sample_values": [
+            "1,200",
+            "1,300",
+            "800"
+          ],
+          "type": "integer",
+          "unnamed": false
+        },
+        {
+          "match_ratio": 1.0,
+          "name": "金额_2",
+          "sample_values": [
+            "1,300",
+            "1,400",
+            "950"
+          ],
+          "type": "integer",
+          "unnamed": false
+        },
+        {
+          "match_ratio": 0.75,
+          "name": "日期",
+          "sample_values": [
+            "2026-03-01",
+            "2026/03/02",
+            "2026年3月3日"
+          ],
+          "type": "date",
+          "unnamed": false
+        }
+      ],
+      "evidence_hash": "8a6d0d4644e14be02f9f7ae259b8d880d55e0d4e6d5d974c48d9989c2c93acd5",
+      "row_count": 4,
+      "source_file": "page_04_messy.html",
+      "table_index": 0
+    },
+    {
+      "column_count": 3,
+      "columns": [
+        {
+          "match_ratio": 1.0,
+          "name": "指标",
+          "sample_values": [
+            "示例指标甲",
+            "示例指标乙",
+            "示例指标丙"
+          ],
+          "type": "text",
+          "unnamed": false
+        },
+        {
+          "match_ratio": 1.0,
+          "name": "数量",
+          "sample_values": [
+            "42",
+            "7",
+            "15"
+          ],
+          "type": "integer",
+          "unnamed": false
+        },
+        {
+          "match_ratio": 1.0,
+          "name": "状态",
+          "sample_values": [
+            "正常",
+            "停用",
+            "正常"
+          ],
+          "type": "enum",
+          "unnamed": false
+        }
+      ],
+      "evidence_hash": "ef2a42f7d504b53bd6fb5b60798a3350bad8ce52d02fe732bc1e70730f891844",
+      "row_count": 3,
+      "source_file": "page_06_mixed.html",
+      "table_index": 1
+    }
+  ],
+  "tables_accepted": 5,
+  "tables_detected": 8,
+  "tables_filtered": [
+    {
+      "reason": "nested_table_skipped",
+      "source_file": "page_03_nested.html",
+      "table_index": 1
+    },
+    {
+      "reason": "below_min_columns",
+      "source_file": "page_06_mixed.html",
+      "table_index": 0
+    },
+    {
+      "reason": "missing_header",
+      "source_file": "page_06_mixed.html",
+      "table_index": 2
+    }
+  ]
+}
