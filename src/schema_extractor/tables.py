@@ -141,6 +141,26 @@ def _caption(table: Node) -> str:
     return _cell_text(caption)
 
 
+def dedupe_names(names: list[str]) -> list[str]:
+    """按出现顺序去重列名：先出现者保留原名，重复者追加 ``_2``、``_3``……
+
+    表头推断与列覆盖规则共用这一语义，确保「同一列」在任何输出中都只有一个
+    名字；空名不会被补位（调用方负责 ``col_N`` 之类的回退）。
+    """
+    result: list[str] = []
+    used: dict[str, int] = {}
+    for base in names:
+        count = used.get(base, 0) + 1
+        used[base] = count
+        name = base if count == 1 else f"{base}_{count}"
+        while name in result:
+            count += 1
+            used[base] = count
+            name = f"{base}_{count}"
+        result.append(name)
+    return result
+
+
 def _header_names(header_grid: list[list[str | None]], width: int) -> tuple[list[str], list[bool]]:
     raw_names: list[str] = []
     unnamed: list[bool] = []
@@ -152,18 +172,9 @@ def _header_names(header_grid: list[list[str | None]], width: int) -> tuple[list
                 value = candidate
         raw_names.append(_WHITESPACE.sub(" ", value).strip())
         unnamed.append(not bool(value.strip()))
-    names: list[str] = []
-    used: dict[str, int] = {}
-    for index, raw in enumerate(raw_names):
-        base = raw or f"col_{index + 1}"
-        count = used.get(base, 0) + 1
-        used[base] = count
-        name = base if count == 1 else f"{base}_{count}"
-        while name in names:
-            count += 1
-            used[base] = count
-            name = f"{base}_{count}"
-        names.append(name)
+    names = dedupe_names(
+        [raw or f"col_{index + 1}" for index, raw in enumerate(raw_names)]
+    )
     return names, unnamed
 
 

@@ -28,3 +28,24 @@ normalization:
     - "%Y-%m-%d"
     - "%Y/%m/%d"
     - "%Y年%m月%d日"
+
+# 可选的列覆盖规则段。未写此段时抽取行为与未引入该功能时完全一致。
+# 规则在列类型推断之后、逐行构造记录之前生效（因此报告的列名、records 的
+# values 键、SQLite columns 台账、issue 的 col_name 使用同一个覆盖后的名字）。
+# 每条规则用 source_glob / column_name_regex / column_index 组合命中一列：
+#   * 三者是 AND 关系，source_glob 缺省为 "*"（相对输入目录的路径，大小写敏感）；
+#   * column_name_regex 对推断后的列名做 re.search，锚定请自行加 ^ / $；
+#   * column_index 是 0 基列序，与台账 col_index 一致。
+# 命中后可强制改 name 和/或 type（name、type 至少给一个，也鼓励两个都给）。
+# 同一列被多条规则命中时，取 priority 最大者；同优先级时后写的规则胜出。
+# 若覆盖后的列名与其它列重名，覆盖名优先，其它列依次追加 _2、_3。
+#
+# column_overrides:
+#   - source_glob: "page_04_messy.html"
+#     column_name_regex: "^col_3$"
+#     name: "备注"
+#   - source_glob: "page_*.html"
+#     column_name_regex: "^金额"
+#     type: currency
+#     priority: 10
+

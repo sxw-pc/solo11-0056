@@ -68,6 +68,53 @@ def build_diff(result: Any, store: Store, baseline_run_id: str | None) -> dict[s
     }
 
 
+def _override_diagnostics(result: Any) -> list[dict[str, Any]]:
+    """每条覆盖规则的命中情况；无命中时也列出，便于发现写错的过期规则。
+
+    一条规则若命中某列但因优先级落选，``matched_columns`` 仍计入该列，
+    同时在 ``applied_columns`` 中单独统计最终生效的列数，便于解释冲突。
+    """
+    configured = list(getattr(result, "column_overrides", ()))
+    if not configured:
+        return []
+    hits = [
+        {"source_file": table.source_file, "table_index": table.table_index, **item}
+        for table in result.accepted_tables
+        for item in table.override_applied
+    ]
+    diagnostics: list[dict[str, Any]] = []
+    for rule in configured:
+        selectors = rule.selectors_to_dict()
+        key = rule.selectors_key
+        matched = [item for item in hits if key in item["matched_rules"]]
+        applied = [
+            item
+            for item in matched
+            if key in (item["applied_name_rule"], item["applied_type_rule"])
+        ]
+        diagnostics.append(
+            {
+                **selectors,
+                "matched_columns": len(matched),
+                "applied_columns": len(applied),
+                "matches": [
+                    {
+                        "source_file": item["source_file"],
+                        "table_index": item["table_index"],
+                        "col_index": item["col_index"],
+                        "original_name": item["original_name"],
+                        "original_type": item["original_type"],
+                        "name": item["name"],
+                        "type": item["type"],
+                        "collision_resolved": item["collision_resolved"],
+                    }
+                    for item in matched
+                ],
+            }
+        )
+    return diagnostics
+
+
 def summary_for_golden(result: Any) -> dict[str, Any]:
     """不包含 run_id / generated_at 的稳定摘要，供 golden 测试逐字段比较。"""
     tables = []
@@ -82,7 +129,7 @@ def summary_for_golden(result: Any) -> dict[str, Any]:
                 "columns": [column.to_dict() for column in table.columns],
             }
         )
-    return {
+    summary: dict[str, Any] = {
         "files_scanned": result.files_scanned,
         "tables_detected": result.tables_detected,
         "tables_accepted": len(result.accepted_tables),
@@ -102,6 +149,11 @@ def summary_for_golden(result: Any) -> dict[str, Any]:
         "files": result.file_summaries,
         "tables": tables,
     }
+    diagnostics = _override_diagnostics(result)
+    if diagnostics:
+        # 只有配置了覆盖规则时才出现，未配置时摘要与旧版本逐字段一致。
+        summary["column_overrides"] = diagnostics
+    return summary
 
 
 def build_report(
@@ -181,6 +233,37 @@ def _diff_section(payload: dict[str, Any]) -> list[str]:
     ]
 
 
+def _override_rows(payload: dict[str, Any]) -> list[str]:
+    diagnostics = payload.get("column_overrides")
+    if not diagnostics:
+        return []
+    lines = [
+        "## 列覆盖规则",
+        "",
+        "| source_glob | 列名正则 | 列序 | 覆盖 name | 覆盖 type | priority | 命中列数 | 生效列数 |",
+        "|---|---|---:|---|---:|---:|---:|---:|",
+    ]
+    for item in diagnostics:
+        lines.append(
+            f"| `{item['source_glob']}` "
+            f"| `{item['column_name_regex'] or '-'}` "
+            f"| {item['column_index'] if item['column_index'] is not None else '-'} "
+            f"| {item['name'] or '-'} "
+            f"| {item['type'] or '-'} "
+            f"| {item['priority']} "
+            f"| {item['matched_columns']} "
+            f"| {item['applied_columns']} |"
+        )
+    stale = [item for item in diagnostics if item["matched_columns"] == 0]
+    if stale:
+        lines += [
+            "",
+            f"> 有 {len(stale)} 条规则未命中任何列，可能已随列名或文件重命名失效。",
+        ]
+    lines.append("")
+    return lines
+
+
 def render_markdown(payload: dict[str, Any]) -> str:
     coverage = payload["evidence_coverage"]
     lines = [
@@ -209,6 +292,7 @@ def render_markdown(payload: dict[str, Any]) -> str:
         "",
         *_type_rows(payload),
         "",
+        *_override_rows(payload),
         "## Issues Top",
         "",
         *_issue_rows(payload),

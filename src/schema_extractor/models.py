@@ -6,6 +6,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any
 
+from .config import ColumnOverride
 from .header_infer import TYPE_ORDER, ColumnProfile
 
 
@@ -21,6 +22,7 @@ class TableResult:
     source_line_start: int
     source_line_end: int
     nested: bool
+    override_applied: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass
@@ -36,6 +38,7 @@ class RunResult:
     issues: list[dict[str, Any]] = field(default_factory=list)
     file_summaries: list[dict[str, Any]] = field(default_factory=list)
     evidence_index: dict[str, dict[str, Any]] = field(default_factory=dict)
+    column_overrides: tuple[ColumnOverride, ...] = ()
     report: dict[str, Any] | None = None
 
     @property

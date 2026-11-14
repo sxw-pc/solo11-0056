@@ -98,6 +98,7 @@ def build_run(config: AppConfig, now: str | None = None) -> RunResult:
         config_sha256=config.config_sha256,
         files_scanned=len(files),
         tables_detected=0,
+        column_overrides=config.column_overrides,
     )
     evidence_records: list[EvidenceRecord] = []
     fragments: dict[str, str] = {}
@@ -171,6 +172,32 @@ def execute_run(
     result.report = payload
     write_reports(payload, config.report_md, config.report_json)
     return result
+
+
+def override_warnings(result: RunResult) -> list[str]:
+    """列出未命中任何列的覆盖规则；防止规则因列改名 / 文件重命名而悄悄失效。"""
+    if not result.column_overrides:
+        return []
+    matched = {
+        key
+        for table in result.accepted_tables
+        for item in table.override_applied
+        for key in item["matched_rules"]
+    }
+    stale = [
+        rule for rule in result.column_overrides if rule.selectors_key not in matched
+    ]
+    if not stale:
+        return []
+    return [
+        "column_overrides 中以下规则未命中任何列: "
+        + "; ".join(
+            f"source_glob={rule.source_glob!r}"
+            f" column_name_regex={rule.column_name_regex!r}"
+            f" column_index={rule.column_index!r}"
+            for rule in stale
+        )
+    ]
 
 
 def records_jsonl(records: list[dict[str, Any]]) -> str:

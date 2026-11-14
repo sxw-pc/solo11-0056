@@ -75,6 +75,55 @@ python -m schema_extractor.cli run --config configs/default.yaml \
 | `inference.max_sample_values` | `3` | 每列保存的样例值数量。 |
 | `inference.identifier_pattern` | 字母前缀编号正则 | `identifier` 类型的整值匹配规则。 |
 | `normalization.date_formats` | `%Y-%m-%d`、`%Y/%m/%d`、`%Y年%m月%d日` | 日期解析尝试顺序。 |
+| `column_overrides` | 缺省不存在 | 可选的列覆盖规则列表，见下节。 |
+
+### 列覆盖规则（`column_overrides`）
+
+自动推断之外，维护者可以钉住个别列的名字或类型。规则段**可选**：不写、
+写空列表，或规则一条都没命中时，records、columns、issues 与摘要输出都与
+未引入该功能时逐字节一致；`strict.yaml` 也不会继承 `default.yaml` 的规则。
+
+规则在**列类型推断完成之后、逐行构造记录之前**生效。每条规则以三者组合
+命中一列（AND 关系，都省略时即匹配所有表的所有列）：
+
+| 字段 | 必填 | 含义 |
+|---|---|---|
+| `source_glob` | 否，默认 `*` | 相对输入目录的路径 glob，大小写敏感，如 `page_04_messy.html`、`reports/*.html`。 |
+| `column_name_regex` | 二者至少一 | 对**推断后的列名**做 `re.search`；需要精确匹配请自行加 `^` / `$`。 |
+| `column_index` | 二者至少一 | 0 基列序，与 SQLite `columns.col_index` 一致。 |
+| `name` | `name`/`type` 至少一 | 强制列名。 |
+| `type` | `name`/`type` 至少一 | 强制类型，取值为 `identifier`、`currency`、`percent`、`integer`、`decimal`、`date`、`enum`、`text`。 |
+| `priority` | 否，默认 `0` | 冲突消解权重，见下。 |
+
+**冲突消解（固定语义）：** 列名与类型分别消解——只声明 `name` 的规则不
+影响类型，只声明 `type` 的规则不影响列名。每项竞争只看命中的规则，取
+`(priority, 配置出现顺序)` 最大者：`priority` 数值大者优先，同优先级时
+**后写的规则胜出**。若覆盖后的名字与别的列重名，覆盖名优先占用，其余列从
+左到右依次追加 `_2`、`_3`。覆盖后的列名会同时出现在 `records.values` 的
+键、`columns` 台账、`issues.col_name` 与报告的 `tables[].columns` 中；
+一条列在任何输出里都只有一个名字。
+
+**强制类型与失败路径：** 覆盖不会改变逐格归一化的行为——按新类型归一化
+失败的格子保留清理后的原文，并照常产生 `number_unparsable` /
+`date_unparsable` 等 issue，`col_name` 使用覆盖后的列名。台账与报告里的
+`match_ratio` 会按强制类型对全部非空格重新计算（`text`/`enum` 为 1.0），
+使偏低的命中率如实反映「这是人工钉住的列」。
+
+**命中诊断：** 只要配置了规则，`report.json` / `report.md` 会多出
+`column_overrides` 段，逐条列出命中列数与生效列数（用于解释优先级落选），
+并在 `pipeline.override_warnings()` 中给出「未命中任何列」的过期规则提示。
+未配置规则时该段完全不存在。
+
+```yaml
+column_overrides:
+  - source_glob: "page_04_messy.html"   # 表头丢失的列按列序钉名
+    column_index: 2
+    name: "备注"
+  - source_glob: "page_*.html"          # 金额列被误判成 integer，钉成 currency
+    column_name_regex: "^金额"
+    type: currency
+    priority: 10
+```
 
 `configs/strict.yaml` 是更严格的示例：至少 2 行、至少 3 列，类型匹配阈值提高到 0.9。
 

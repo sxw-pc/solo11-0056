@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any
 
 from .config import AppConfig
 from .evidence import EvidenceRecord, build_evidence
-from .header_infer import ColumnProfile, infer_columns
+from .header_infer import ColumnProfile, apply_column_overrides, infer_columns
 from .models import RunResult, TableResult
 from .normalize import normalize_cell
-from .tables import TableCandidate
+from .tables import TableCandidate, dedupe_names
 
 
 def table_issue(
@@ -22,6 +23,32 @@ def table_issue(
         "col_name": column,
         "reason": reason,
     }
+
+
+def _resolve_column_names(
+    columns: list[ColumnProfile], touched: set[int]
+) -> list[ColumnProfile]:
+    """覆盖后的列名去重，保证 values / 台账 / issue / 报告使用同一名字。
+
+    覆盖规则声明的列名拥有**优先权**：把它们排在去重序列前面，依次占用
+    名字（同名时靠后的追加 ``_2``、``_3``），再处理其余列。因此「强制
+    改列名」得到的就是配置里写的名字，被挤占的推断列名才追加后缀。
+    去重复用 ``tables.dedupe_names``，与表头阶段保持同一语义。
+    """
+    if not touched:
+        return columns
+    names = [column.name for column in columns]
+    order = [index for index in range(len(names)) if index in touched]
+    order += [index for index in range(len(names)) if index not in touched]
+    deduped = dedupe_names([names[index] for index in order])
+    resolved = list(names)
+    for index, name in zip(order, deduped):
+        resolved[index] = name
+    if resolved == names:
+        return columns
+    return [
+        replace(column, name=name) for column, name in zip(columns, resolved)
+    ]
 
 
 def build_record(
@@ -61,13 +88,35 @@ def process_table(
     source: str,
     candidate: TableCandidate,
 ) -> tuple[TableResult, EvidenceRecord]:
-    columns = infer_columns(
+    inferred = infer_columns(
         candidate.header_names,
         candidate.unnamed_headers,
         candidate.data_rows,
         config.inference,
         config.normalization,
     )
+    overridden, applied = apply_column_overrides(
+        inferred,
+        candidate.data_rows,
+        config.column_overrides,
+        source_file,
+        config.inference,
+        config.normalization,
+    )
+    touched = {item["col_index"] for item in applied}
+    columns = _resolve_column_names(overridden, touched)
+    # 去重可能改掉覆盖名（同名列冲突），以最终列名回填诊断记录
+    applied = [
+        {
+            **item,
+            "name": columns[item["col_index"]].name,
+            "collision_resolved": (
+                item["requested_name"] is not None
+                and columns[item["col_index"]].name != item["requested_name"]
+            ),
+        }
+        for item in applied
+    ]
     records: list[dict[str, Any]] = []
     issues: list[dict[str, Any]] = []
     for row_index, row in enumerate(candidate.data_rows):
@@ -100,6 +149,7 @@ def process_table(
         source_line_start=evidence.source_line_start,
         source_line_end=evidence.source_line_end,
         nested=candidate.nested,
+        override_applied=applied,
     )
     return result, evidence
 

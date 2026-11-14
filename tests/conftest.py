@@ -28,6 +28,7 @@ def config_factory(tmp_path):
         table_selector: dict | None = None,
         inference: dict | None = None,
         normalization: dict | None = None,
+        column_overrides: list | None = None,
         input_dir: str | None = None,
         file_glob: str = "*.html",
     ) -> AppConfig:
@@ -50,6 +51,8 @@ def config_factory(tmp_path):
             data["inference"] = inference
         if normalization is not None:
             data["normalization"] = normalization
+        if column_overrides is not None:
+            data["column_overrides"] = column_overrides
         config_path = tmp_path / f"config_{index}.yaml"
         config_path.write_text(
             yaml.safe_dump(data, allow_unicode=True, sort_keys=False),

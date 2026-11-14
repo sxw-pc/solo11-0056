@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import copy
+import fnmatch
 import hashlib
 import re
 from dataclasses import dataclass, field
@@ -13,6 +14,18 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+
+# 列类型顺序同时决定报告的分布排序；覆盖规则也复用同一份取值集合。
+COLUMN_TYPE_ORDER = (
+    "identifier",
+    "currency",
+    "percent",
+    "integer",
+    "decimal",
+    "date",
+    "enum",
+    "text",
+)
 
 
 class ConfigError(ValueError):
@@ -50,10 +63,78 @@ DEFAULT_CONFIG: dict[str, Any] = {
     },
 }
 
-_TOP_LEVEL_KEYS = set(DEFAULT_CONFIG)
+_TOP_LEVEL_KEYS = set(DEFAULT_CONFIG) | {"column_overrides"}
 _TABLE_KEYS = set(DEFAULT_CONFIG["table_selector"])
 _INFERENCE_KEYS = set(DEFAULT_CONFIG["inference"])
 _NORMALIZATION_KEYS = set(DEFAULT_CONFIG["normalization"])
+
+_OVERRIDE_KEYS = frozenset(
+    {
+        "source_glob",
+        "column_name_regex",
+        "column_index",
+        "name",
+        "type",
+        "priority",
+    }
+)
+
+
+@dataclass(frozen=True)
+class ColumnOverride:
+    """一条列覆盖规则。
+
+    选择器之间是 AND 关系：``source_glob``（缺省 ``*``）与
+    ``column_name_regex`` / ``column_index`` 同时命中才算命中。
+    ``column_name_regex`` 对**推断后的原始列名**做 ``re.search``（正则默认
+    语义），因此 ``^金额`` 可命中所有以「金额」开头的列；需要精确匹配时在
+    自己写的表达式末尾加 ``$``。``column_index`` 为 0 基列序，与 SQLite
+    台账的 ``col_index`` 一致。
+
+    一列最多采纳一条规则：同一列被多条规则命中时取 ``(priority, order)``
+    最大者，即 ``priority`` 数值大者优先，同优先级时配置中靠后的规则胜出。
+    """
+
+    source_glob: str
+    column_name_regex: str | None
+    column_index: int | None
+    name: str | None
+    type: str | None
+    priority: int
+    order: int
+
+    @property
+    def name_pattern(self) -> re.Pattern[str] | None:
+        if self.column_name_regex is None:
+            return None
+        return re.compile(self.column_name_regex)
+
+    def matches(self, source_file: str, column_name: str, col_index: int) -> bool:
+        if not fnmatch.fnmatchcase(source_file, self.source_glob):
+            return False
+        if self.column_index is not None and self.column_index != col_index:
+            return False
+        pattern = self.name_pattern
+        if pattern is not None and pattern.search(column_name) is None:
+            return False
+        return True
+
+    def selectors_to_dict(self) -> dict[str, object]:
+        """规则的稳定描述，用于报告中的命中诊断。``order`` 是配置中的位置。"""
+        return {
+            "order": self.order,
+            "source_glob": self.source_glob,
+            "column_name_regex": self.column_name_regex,
+            "column_index": self.column_index,
+            "name": self.name,
+            "type": self.type,
+            "priority": self.priority,
+        }
+
+    @property
+    def selectors_key(self) -> tuple[tuple[str, object], ...]:
+        """``selectors_to_dict`` 的可哈希形式，便于按规则统计命中。"""
+        return tuple(sorted(self.selectors_to_dict().items()))
 
 
 @dataclass(frozen=True)
@@ -103,6 +184,7 @@ class AppConfig:
     normalization: NormalizationOptions
     config_sha256: str
     source_path: Path
+    column_overrides: tuple[ColumnOverride, ...] = ()
     raw: dict[str, Any] = field(default_factory=dict)
 
 
@@ -135,6 +217,83 @@ def _require_str(value: Any, name: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ConfigError(f"{name} 必须是非空字符串")
     return value.strip()
+
+
+def _require_int_value(value: Any, name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ConfigError(f"{name} 必须是整数")
+    return value
+
+
+def validate_column_overrides(raw: dict[str, Any]) -> None:
+    """校验可选的 ``column_overrides`` 段；缺省时完全不做任何检查。"""
+
+    if "column_overrides" not in raw:
+        return
+    rules = raw["column_overrides"]
+    if rules is None:
+        # 只写了一个键、内容全部注释掉时视为「没有规则」，不报错。
+        return
+    if not isinstance(rules, list):
+        raise ConfigError("column_overrides 必须是列表")
+    for position, rule in enumerate(rules):
+        label = f"column_overrides[{position}]"
+        if not isinstance(rule, dict):
+            raise ConfigError(f"{label} 必须是映射")
+        extra = set(rule) - _OVERRIDE_KEYS
+        if extra:
+            raise ConfigError(f"{label} 存在未知配置项: {', '.join(sorted(extra))}")
+        source_glob = rule.get("source_glob", "*")
+        if not isinstance(source_glob, str) or not source_glob.strip():
+            raise ConfigError(f"{label}.source_glob 必须是非空字符串")
+        has_regex = "column_name_regex" in rule
+        has_index = "column_index" in rule
+        if not has_regex and not has_index:
+            raise ConfigError(
+                f"{label} 必须至少提供 column_name_regex 或 column_index"
+            )
+        if has_regex:
+            regex = rule["column_name_regex"]
+            if not isinstance(regex, str) or not regex:
+                raise ConfigError(f"{label}.column_name_regex 必须是非空字符串")
+            try:
+                re.compile(regex)
+            except re.error as exc:
+                raise ConfigError(
+                    f"{label}.column_name_regex 非法: {exc}"
+                ) from exc
+        if has_index:
+            index = rule["column_index"]
+            if isinstance(index, bool) or not isinstance(index, int) or index < 0:
+                raise ConfigError(f"{label}.column_index 必须是 >= 0 的整数")
+        if "name" not in rule and "type" not in rule:
+            raise ConfigError(f"{label} 必须至少提供 name 或 type")
+        if "name" in rule:
+            _require_str(rule["name"], f"{label}.name")
+        if "type" in rule and rule["type"] not in COLUMN_TYPE_ORDER:
+            raise ConfigError(
+                f"{label}.type 只能是 {', '.join(COLUMN_TYPE_ORDER)} 之一"
+            )
+        if "priority" in rule:
+            _require_int_value(rule["priority"], f"{label}.priority")
+
+
+def _build_column_overrides(raw: dict[str, Any]) -> tuple[ColumnOverride, ...]:
+    rules: list[ColumnOverride] = []
+    for position, rule in enumerate(raw.get("column_overrides") or []):
+        name = rule.get("name")
+        rules.append(
+            ColumnOverride(
+                source_glob=str(rule.get("source_glob", "*")).strip(),
+                column_name_regex=rule.get("column_name_regex"),
+                column_index=rule.get("column_index"),
+                name=None if name is None else str(name).strip(),
+                type=rule.get("type"),
+                priority=int(rule.get("priority", 0)),
+                order=position,
+            )
+        )
+    return tuple(rules)
 
 
 def validate_config(raw: dict[str, Any]) -> None:
@@ -200,6 +359,8 @@ def validate_config(raw: dict[str, Any]) -> None:
     if any(not isinstance(item, str) or not item for item in formats):
         raise ConfigError("normalization.date_formats 中的每一项都必须是非空字符串")
 
+    validate_column_overrides(raw)
+
 
 def _canonical_sha256(raw: dict[str, Any]) -> str:
     payload = yaml.safe_dump(
@@ -258,6 +419,7 @@ def load_config(path: str | Path) -> AppConfig:
         table_selector=selector,
         inference=inference,
         normalization=normalization,
+        column_overrides=_build_column_overrides(raw),
         config_sha256=_canonical_sha256(raw),
         source_path=config_path,
         raw=copy.deepcopy(raw),
