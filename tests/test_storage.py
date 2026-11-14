@@ -134,6 +134,21 @@ def test_missing_run_returns_none_and_empty_collections(tmp_path):
     assert store.columns_for_run("missing") == []
     assert store.issues_for_run("missing") == []
     assert store.table_keys("missing") == set()
+    assert store.table_row_counts("missing") == {}
+    assert store.columns_by_table("missing") == {}
+
+
+def test_table_row_counts_and_columns_by_table(tmp_path):
+    store = Store(tmp_path / "runs.sqlite3")
+    store.initialize()
+    store.save_snapshot(*_snapshot())
+    assert store.table_row_counts("run-1") == {"page.html#0": 2}
+    assert store.columns_by_table("run-1") == {
+        "page.html#0": [
+            {"col_index": 0, "name": "编号", "type": "identifier"},
+            {"col_index": 1, "name": "金额", "type": "currency"},
+        ]
+    }
 
 
 def test_issues_limit_and_ordering(tmp_path):

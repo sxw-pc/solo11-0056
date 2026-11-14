@@ -217,6 +217,20 @@ class Store:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def columns_by_table(self, run_id: str) -> dict[str, list[dict[str, Any]]]:
+        """按表分组的列（保持 col_index 顺序），key 为 source_file#table_index。"""
+        grouped: dict[str, list[dict[str, Any]]] = {}
+        for row in self.columns_for_run(run_id):
+            key = f"{row['source_file']}#{row['table_index']}"
+            grouped.setdefault(key, []).append(
+                {
+                    "col_index": int(row["col_index"]),
+                    "name": row["name"],
+                    "type": row["type"],
+                }
+            )
+        return grouped
+
     def issues_for_run(self, run_id: str, limit: int = 20) -> list[dict[str, Any]]:
         with self.connect() as connection:
             rows = connection.execute(
@@ -238,5 +252,12 @@ class Store:
     def table_keys(self, run_id: str) -> set[str]:
         return {
             f"{row['source_file']}#{row['table_index']}"
+            for row in self.tables_for_run(run_id)
+        }
+
+    def table_row_counts(self, run_id: str) -> dict[str, int]:
+        """每张表的行数，key 为 source_file#table_index。"""
+        return {
+            f"{row['source_file']}#{row['table_index']}": int(row["row_count"])
             for row in self.tables_for_run(run_id)
         }

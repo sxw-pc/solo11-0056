@@ -29,6 +29,66 @@ def _evidence_coverage(result: Any) -> dict[str, Any]:
     return {"tables_with_hash": with_hash, "tables_total": total, "ratio": ratio}
 
 
+def _current_table_details(result: Any) -> dict[str, dict[str, Any]]:
+    details: dict[str, dict[str, Any]] = {}
+    for table in result.accepted_tables:
+        key = f"{table.source_file}#{table.table_index}"
+        details[key] = {
+            "row_count": len(table.records),
+            "columns": {column.name: column.type for column in table.columns},
+        }
+    return details
+
+
+def _diff_table(
+    key: str, current: dict[str, Any], baseline: dict[str, Any]
+) -> dict[str, Any]:
+    """按列名对齐两侧列；列顺序交换不算类型变化。
+
+    列集合完全不相交时 type_changed 自然为空，全部当前列只体现在
+    new_columns 中，不会伪造类型变化。
+    """
+    current_columns = current["columns"]
+    baseline_columns = baseline["columns"]
+    common_names = set(current_columns) & set(baseline_columns)
+    type_changed = [
+        {
+            "column": name,
+            "baseline_type": baseline_columns[name],
+            "current_type": current_columns[name],
+        }
+        for name in sorted(common_names)
+        if baseline_columns[name] != current_columns[name]
+    ]
+    return {
+        "table": key,
+        "baseline_rows": baseline["row_count"],
+        "current_rows": current["row_count"],
+        "rows_delta": current["row_count"] - baseline["row_count"],
+        "type_changed": type_changed,
+        "new_columns": sorted(set(current_columns) - set(baseline_columns)),
+    }
+
+
+def _table_diffs(
+    result: Any, store: Store, baseline_run_id: str, common_keys: set[str]
+) -> list[dict[str, Any]]:
+    current_details = _current_table_details(result)
+    baseline_rows = store.table_row_counts(baseline_run_id)
+    baseline_columns = store.columns_by_table(baseline_run_id)
+    diffs = []
+    for key in sorted(common_keys):
+        baseline_detail = {
+            "row_count": baseline_rows[key],
+            "columns": {
+                column["name"]: column["type"]
+                for column in baseline_columns.get(key, [])
+            },
+        }
+        diffs.append(_diff_table(key, current_details[key], baseline_detail))
+    return diffs
+
+
 def build_diff(result: Any, store: Store, baseline_run_id: str | None) -> dict[str, Any]:
     current_records = result.records_written
     if not baseline_run_id:
@@ -56,6 +116,7 @@ def build_diff(result: Any, store: Store, baseline_run_id: str | None) -> dict[s
         f"{table.source_file}#{table.table_index}" for table in result.accepted_tables
     }
     baseline_keys = store.table_keys(baseline_run_id)
+    common_keys = current_keys & baseline_keys
     return {
         "status": "compared",
         "baseline_run_id": baseline_run_id,
@@ -65,6 +126,7 @@ def build_diff(result: Any, store: Store, baseline_run_id: str | None) -> dict[s
         "current_records": current_records,
         "new_tables": sorted(current_keys - baseline_keys),
         "disappeared_tables": sorted(baseline_keys - current_keys),
+        "table_diffs": _table_diffs(result, store, baseline_run_id, common_keys),
     }
 
 
@@ -168,17 +230,46 @@ def _issue_rows(payload: dict[str, Any]) -> list[str]:
     ]
 
 
+def _table_diff_rows(diff: dict[str, Any]) -> list[str]:
+    table_diffs = diff.get("table_diffs") or []
+    if not table_diffs:
+        return ["- 无共同表"]
+    lines = []
+    for item in table_diffs:
+        parts = [
+            f"行数 {item['rows_delta']:+d}"
+            f"（{item['baseline_rows']} → {item['current_rows']}）"
+        ]
+        if item["type_changed"]:
+            changes = "、".join(
+                f"`{change['column']}` "
+                f"{change['baseline_type']}→{change['current_type']}"
+                for change in item["type_changed"]
+            )
+            parts.append(f"类型变化：{changes}")
+        if item["new_columns"]:
+            additions = "、".join(f"`{name}`" for name in item["new_columns"])
+            parts.append(f"新增列：{additions}")
+        if len(parts) == 1:
+            parts.append("列无变化")
+        lines.append(f"- `{item['table']}`：" + "；".join(parts))
+    return lines
+
+
 def _diff_section(payload: dict[str, Any]) -> list[str]:
     diff = payload["diff"]
     if diff["status"] == "no_baseline":
         return ["无基线。"]
-    return [
+    lines = [
         f"- 基线 run：`{diff['baseline_run_id']}`",
         f"- 记录总数变化：{diff['records_delta']:+d}"
         f"（{diff['baseline_records']} → {diff['current_records']}）",
         f"- 新增表：{', '.join(diff['new_tables']) or '无'}",
         f"- 消失表：{', '.join(diff['disappeared_tables']) or '无'}",
+        "- 表级差异：",
     ]
+    lines.extend(f"  {row}" for row in _table_diff_rows(diff))
+    return lines
 
 
 def render_markdown(payload: dict[str, Any]) -> str:
