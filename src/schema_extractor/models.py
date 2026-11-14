@@ -7,6 +7,23 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .header_infer import TYPE_ORDER, ColumnProfile
+from .normalize import INTERVAL_KIND, IntervalValue, canonical_decimal
+
+
+def cell_value(normalized: str | IntervalValue) -> str | dict[str, str]:
+    """把规范化结果转成记录 ``values`` 里的可序列化结构。
+
+    标量继续是扁平字符串，既有单值记录的形状完全不变；区间值则是
+    ``{"kind": "interval", "lower": ..., "upper": ...}``，两个端点均为
+    规范化十进制字符串。
+    """
+    if isinstance(normalized, IntervalValue):
+        return {
+            "kind": INTERVAL_KIND,
+            "lower": canonical_decimal(normalized.lower),
+            "upper": canonical_decimal(normalized.upper),
+        }
+    return normalized
 
 
 @dataclass

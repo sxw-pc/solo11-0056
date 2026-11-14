@@ -5,10 +5,19 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .config import InferenceOptions, NormalizationOptions
-from .normalize import clean_text, is_currency, is_date, is_decimal, is_integer, is_percent
+from .normalize import (
+    clean_text,
+    is_currency,
+    is_date,
+    is_decimal,
+    is_integer,
+    is_interval,
+    is_percent,
+)
 
 TYPE_ORDER = (
     "identifier",
+    "interval",
     "currency",
     "percent",
     "integer",
@@ -89,6 +98,9 @@ def infer_column(
                 if options.identifier_re.fullmatch(value) is not None
             ),
         ),
+        # 区间形状优先于文本回退：单位冲突 / 上下限颠倒仍算区间列，
+        # 由规范化在这些单元格上给出 issue，而不是把整列降级为 text。
+        ("interval", sum(1 for value in non_empty if is_interval(value))),
     ]
     for type_name, matches in checks:
         ratio = _ratio(matches, len(non_empty))

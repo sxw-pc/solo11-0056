@@ -97,7 +97,7 @@ python -m schema_extractor.cli run --config configs/default.yaml \
 │   ├── dom.py                  # html.parser 轻量 DOM
 │   ├── tables.py               # 表格识别、表头、span 网格展开
 │   ├── header_infer.py         # 确定性列类型推断
-│   ├── normalize.py            # 数字/日期/文本规范化
+│   ├── normalize.py            # 数字/日期/文本/区间规范化
 │   ├── pipeline.py             # 编排、run_id、输出
 │   ├── processing.py           # 表格 → 记录 / issue / 证据
 │   ├── models.py               # 运行期结果模型
@@ -140,6 +140,37 @@ SQLite 使用 5 张表，schema 内联在 `storage.py` 的 `SCHEMA` 常量中：
 - 百分比保留数值、单位记为 `%`；货币单位映射为 `CNY` / `USD` / `EUR`。
 - 日期统一为 `YYYY-MM-DD`；失败时保留清理后的原文并产生 issue，不抛异常。
 - 文本清理首尾空白并合并连续空白；空单元格统一为 `""`。
+- 标量单元格的 `values` 值始终是扁平字符串；只有区间列成功拆解时才是嵌套对象，
+  因此既有单值记录的结构与 golden 不受影响。
+
+### 区间值（`interval`）
+
+金额区间、比例区间这类单元格会被推断为 `interval` 列，拆成下限与上限两个规范化数字：
+
+```json
+{
+  "values": {
+    "合同金额区间": {"kind": "interval", "lower": "300", "upper": "500"},
+    "完成率区间": {"kind": "interval", "lower": "5", "upper": "8"}
+  },
+  "units": {"合同金额区间": "CNY", "完成率区间": "%"}
+}
+```
+
+连接符语义与失败路径：
+
+- `-`、`~`、`～`、`–`、`—` 都表示**从下限到上限的闭区间**，不按减法解释；两端必须
+  各自是独立数字（可带货币前缀或 `%`/货币后缀）。
+- 两端单位一致（`¥300~¥500`、`300元~500元`、`5%~8%`）或两端都没有单位（`100-200`）
+  时拆解成功，`units` 记录该一致单位；两端都没有单位时不写 `units`。
+- 只有一端带单位（`100-300元`、`¥10~20`）、两端单位不同（`¥100~$200`）都属于单位
+  对不齐：保留清理后的原文，`values` 仍是字符串，并给出 `interval_unit_conflict` issue。
+- 下限大于上限（`200-100`）给出 `interval_bounds_reversed`；非数值（`面议`）或残缺
+  （`100-`）给出 `interval_unparsable`。以上失败都不抛异常。
+- `A-1001` 这类以字母开头的编号不满足“两端都是数字”的区间形状，不会被拆开，
+  仍按 `identifier` 列处理。
+- 只要区间形状的占比达到 `inference.min_match_ratio`，列就会被判为 `interval`，不会
+  因为个别冲突/非数值行整体回退为 `text`；这些行按上面的失败路径逐格给 issue。
 
 ## 证据与确定性
 

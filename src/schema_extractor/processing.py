@@ -7,7 +7,7 @@ from typing import Any
 from .config import AppConfig
 from .evidence import EvidenceRecord, build_evidence
 from .header_infer import ColumnProfile, infer_columns
-from .models import RunResult, TableResult
+from .models import RunResult, TableResult, cell_value
 from .normalize import normalize_cell
 from .tables import TableCandidate
 
@@ -32,13 +32,13 @@ def build_record(
     columns: list[ColumnProfile],
     date_formats: tuple[str, ...],
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-    values: dict[str, str] = {}
+    values: dict[str, Any] = {}
     units: dict[str, str] = {}
     issues: list[dict[str, Any]] = []
     for index, column in enumerate(columns):
         raw = row[index] if index < len(row) else None
         normalized, unit, reason = normalize_cell(raw, column.type, date_formats)
-        values[column.name] = normalized
+        values[column.name] = cell_value(normalized)
         if unit:
             units[column.name] = unit
         if reason is not None:
