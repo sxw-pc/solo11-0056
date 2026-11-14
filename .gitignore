@@ -12,3 +12,7 @@ report.json
 .coverage
 htmlcov/
 .venv/
+venv/
+node_modules/
+*.pyc
+.env
