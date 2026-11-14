@@ -34,6 +34,8 @@ CREATE TABLE IF NOT EXISTS columns (
     name TEXT NOT NULL,
     type TEXT NOT NULL,
     match_ratio REAL NOT NULL,
+    type_source TEXT NOT NULL DEFAULT 'value',
+    confidence TEXT NOT NULL DEFAULT 'high',
     PRIMARY KEY (run_id, source_file, table_index, col_index)
 );
 CREATE TABLE IF NOT EXISTS records (
@@ -58,6 +60,12 @@ CREATE INDEX IF NOT EXISTS idx_records_run ON records(run_id);
 CREATE INDEX IF NOT EXISTS idx_issues_run ON issues(run_id);
 """
 
+#: 旧版数据库缺少的 columns 列：initialize 时按 PRAGMA 检查补齐。
+_COLUMN_MIGRATIONS: tuple[tuple[str, str], ...] = (
+    ("type_source", "TEXT NOT NULL DEFAULT 'value'"),
+    ("confidence", "TEXT NOT NULL DEFAULT 'high'"),
+)
+
 
 class Store:
     def __init__(self, database: str | Path) -> None:
@@ -72,6 +80,15 @@ class Store:
     def initialize(self) -> None:
         with self.connect() as connection:
             connection.executescript(SCHEMA)
+            existing = {
+                row[1]
+                for row in connection.execute("PRAGMA table_info(columns)")
+            }
+            for name, definition in _COLUMN_MIGRATIONS:
+                if name not in existing:
+                    connection.execute(
+                        f"ALTER TABLE columns ADD COLUMN {name} {definition}"
+                    )
 
     def save_snapshot(
         self,
@@ -132,8 +149,8 @@ class Store:
             connection.executemany(
                 """INSERT OR REPLACE INTO columns
                 (run_id, source_file, table_index, col_index,
-                 name, type, match_ratio)
-                VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                 name, type, match_ratio, type_source, confidence)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 [
                     (
                         row["run_id"],
@@ -143,6 +160,8 @@ class Store:
                         row["name"],
                         row["type"],
                         row["match_ratio"],
+                        row.get("type_source", "value"),
+                        row.get("confidence", "high"),
                     )
                     for row in column_rows
                 ],
@@ -210,7 +229,8 @@ class Store:
     def columns_for_run(self, run_id: str) -> list[dict[str, Any]]:
         with self.connect() as connection:
             rows = connection.execute(
-                """SELECT source_file, table_index, col_index, name, type, match_ratio
+                """SELECT source_file, table_index, col_index, name, type,
+                          match_ratio, type_source, confidence
                    FROM columns WHERE run_id = ?
                    ORDER BY source_file, table_index, col_index""",
                 (run_id,),

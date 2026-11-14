@@ -157,9 +157,13 @@ def normalize_cell(
         return canonical_decimal(number), "%", None
     if type_name == "currency":
         parsed = parse_currency(text)
-        if parsed is None:
-            return text, "", "number_unparsable"
-        return canonical_decimal(parsed[0]), parsed[1], None
+        if parsed is not None:
+            return canonical_decimal(parsed[0]), parsed[1], None
+        plain = parse_plain_number(text)
+        if plain is not None:
+            # 货币列中的无符号数字按金额规范化，但不标注单位。
+            return canonical_decimal(plain[0]), "", None
+        return text, "", "number_unparsable"
     if type_name == "date":
         normalized = parse_date(text, date_formats)
         if normalized is None:

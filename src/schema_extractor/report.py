@@ -29,6 +29,28 @@ def _evidence_coverage(result: Any) -> dict[str, Any]:
     return {"tables_with_hash": with_hash, "tables_total": total, "ratio": ratio}
 
 
+def _low_confidence_columns(result: Any) -> list[dict[str, Any]]:
+    """低置信列汇总：采信表头或冲突回退的列，按表序、列序稳定排列。"""
+    entries: list[dict[str, Any]] = []
+    for table in result.accepted_tables:
+        for index, column in enumerate(table.columns):
+            if column.type_source == "value" and column.confidence == "high":
+                continue
+            entries.append(
+                {
+                    "source_file": table.source_file,
+                    "table_index": table.table_index,
+                    "col_index": index,
+                    "name": column.name,
+                    "type": column.type,
+                    "type_source": column.type_source,
+                    "confidence": column.confidence,
+                    "match_ratio": column.match_ratio,
+                }
+            )
+    return entries
+
+
 def build_diff(result: Any, store: Store, baseline_run_id: str | None) -> dict[str, Any]:
     current_records = result.records_written
     if not baseline_run_id:
@@ -116,6 +138,7 @@ def build_report(
             "config_sha256": result.config_sha256,
             "tables_filtered_count": len(result.filtered_tables),
             "issues_top": _issue_rollup(result.issues),
+            "low_confidence_columns": _low_confidence_columns(result),
             "diff": build_diff(result, store, baseline_run_id),
         }
     )
@@ -168,6 +191,22 @@ def _issue_rows(payload: dict[str, Any]) -> list[str]:
     ]
 
 
+def _low_confidence_rows(payload: dict[str, Any]) -> list[str]:
+    entries = payload["low_confidence_columns"]
+    if not entries:
+        return ["- 无"]
+    lines = [
+        "| 文件 | 表序号 | 列 | 判定类型 | 类型来源 | 匹配比例 |",
+        "|---|---:|---|---|---|---:|",
+    ]
+    lines.extend(
+        f"| {item['source_file']} | {item['table_index']} | {item['name']} "
+        f"| {item['type']} | {item['type_source']} | {item['match_ratio']:.2%} |"
+        for item in entries
+    )
+    return lines
+
+
 def _diff_section(payload: dict[str, Any]) -> list[str]:
     diff = payload["diff"]
     if diff["status"] == "no_baseline":
@@ -200,6 +239,7 @@ def render_markdown(payload: dict[str, Any]) -> str:
         f"| 被过滤表格数 | {payload['tables_filtered_count']} |",
         f"| 记录数 | {payload['records_written']} |",
         f"| issues 数 | {payload['issues_count']} |",
+        f"| 低置信列数 | {len(payload['low_confidence_columns'])} |",
         "",
         "## 采信表格",
         "",
@@ -208,6 +248,10 @@ def render_markdown(payload: dict[str, Any]) -> str:
         "## 列类型分布",
         "",
         *_type_rows(payload),
+        "",
+        "## 低置信列",
+        "",
+        *_low_confidence_rows(payload),
         "",
         "## Issues Top",
         "",

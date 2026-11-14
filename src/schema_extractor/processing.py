@@ -6,10 +6,16 @@ from typing import Any
 
 from .config import AppConfig
 from .evidence import EvidenceRecord, build_evidence
-from .header_infer import ColumnProfile, infer_columns
+from .header_infer import TYPE_SOURCE_CONFLICT, ColumnProfile, infer_columns
 from .models import RunResult, TableResult
 from .normalize import normalize_cell
 from .tables import TableCandidate
+
+#: 列级 issue（非某一行的问题）使用的 row_index 哨兵值。
+COLUMN_ISSUE_ROW = -1
+
+#: 表头语义与取值证据明显冲突时的 issue reason。
+HEADER_VALUE_CONFLICT = "header_value_conflict"
 
 
 def table_issue(
@@ -22,6 +28,19 @@ def table_issue(
         "col_name": column,
         "reason": reason,
     }
+
+
+def column_issues(
+    table_index: int, source_file: str, columns: list[ColumnProfile]
+) -> list[dict[str, Any]]:
+    """表头与取值冲突的列各产生一条列级 issue；顺序随列序，结果确定。"""
+    return [
+        table_issue(
+            table_index, source_file, COLUMN_ISSUE_ROW, column.name, HEADER_VALUE_CONFLICT
+        )
+        for column in columns
+        if column.type_source == TYPE_SOURCE_CONFLICT
+    ]
 
 
 def build_record(
@@ -69,7 +88,9 @@ def process_table(
         config.normalization,
     )
     records: list[dict[str, Any]] = []
-    issues: list[dict[str, Any]] = []
+    issues: list[dict[str, Any]] = column_issues(
+        candidate.table_index, source_file, columns
+    )
     for row_index, row in enumerate(candidate.data_rows):
         record, row_issues = build_record(
             source_file,
@@ -137,6 +158,8 @@ def snapshot_rows(
                     "name": column.name,
                     "type": column.type,
                     "match_ratio": column.match_ratio,
+                    "type_source": column.type_source,
+                    "confidence": column.confidence,
                 }
             )
         for record in table.records:
